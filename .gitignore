@@ -1,0 +1,36 @@
+# Imágenes locales del dataset; conserva las guías README.md.
+/dataset/**/*.jpg
+/dataset/**/*.JPG
+/dataset/**/*.jpeg
+/dataset/**/*.JPEG
+/dataset/**/*.png
+/dataset/**/*.PNG
+/dataset/**/*.webp
+/dataset/**/*.WEBP
+/dataset/**/*.bmp
+/dataset/**/*.BMP
+/dataset/**/*.tif
+/dataset/**/*.TIF
+/dataset/**/*.tiff
+/dataset/**/*.TIFF
+/dataset/**/*.heic
+/dataset/**/*.HEIC
+/dataset/**/*.gif
+/dataset/**/*.GIF
+
+# Base de datos y archivos temporales de SQLite.
+/dataset/metadata.sqlite*
+
+# Pesos, modelos y resultados locales de entrenamiento.
+/models/
+/experiments/
+/results/
+*.pt
+*.pth
+*.onnx
+
+# Python.
+__pycache__/
+*.py[cod]
+.venv/
+venv/
