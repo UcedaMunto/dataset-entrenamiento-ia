@@ -33,6 +33,7 @@ _last_nim_request_at: float | None = None
 CANCEL_REQUESTED = threading.Event()
 ANALYSIS_PROMPT_VERSION = "4"
 NIM_ANALYSIS_PROMPT_VERSION = "5"
+NIM_VISION_MODEL = "nvidia/nemotron-3.5-super-vl-120b-a12b"
 DEFAULT_PROMPT_INSTRUCTIONS = (
     "Determina si la imagen muestra claramente una sola prenda de la clase indicada. "
     "Si no corresponde a la clase, está corrupta, es ilegible, contiene principalmente "
@@ -53,7 +54,7 @@ PROVIDER_DEFAULTS = {
     "openai": ("OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL",
                "https://api.openai.com/v1", "gpt-4o-mini"),
     "nim": ("NVIDIA_NIM_API_KEY", "NVIDIA_NIM_BASE_URL", "NVIDIA_NIM_MODEL",
-            "https://integrate.api.nvidia.com/v1", "meta/llama-3.2-11b-vision-instruct"),
+            "https://integrate.api.nvidia.com/v1", NIM_VISION_MODEL),
     "deepseek": ("DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL", "DEEPSEEK_MODEL",
                  "https://api.deepseek.com", "deepseek-flash"),
 }
@@ -593,6 +594,8 @@ def request_nim_stage_json(
             ],
         }],
     }
+    if model == NIM_VISION_MODEL:
+        payload["reasoning_effort"] = "none"
     for attempt in range(2):
         wait_for_nim_request_slot()
         if CANCEL_REQUESTED.is_set():
@@ -632,28 +635,37 @@ def request_nim_stage_json(
             )
         try:
             result = parse_model_json(content)
-            validate_nim_stage_result(result, stage)
-            return result
-        except ValueError as error:
-            if attempt == 0:
-                if CANCEL_REQUESTED.is_set():
-                    raise ProcessingCancelled(
-                        "Detención solicitada; no se reintentará la respuesta JSON inválida."
-                    ) from error
-                payload["max_tokens"] = 512
-                payload["messages"][0]["content"][0]["text"] += (
-                    "\nReintento: responde solo con un objeto JSON válido, sin texto "
-                    "antes ni después y con las claves exactas indicadas."
-                )
-                print(
-                    f"JSON inválido de NIM en etapa {stage} "
-                    f"(caracteres={len(content)}); se reintentará una vez."
-                )
-                continue
-            raise ValueError(
-                f"NIM devolvió JSON inválido en etapa {stage} "
-                f"(caracteres={len(content)}): {error}"
-            ) from error
+        except ValueError as parse_error:
+            failure = parse_error
+            problem = "JSON malformado"
+        else:
+            try:
+                validate_nim_stage_result(result, stage)
+                return result
+            except ValueError as validation_error:
+                failure = validation_error
+                problem = "estructura JSON inesperada"
+        if attempt == 0:
+            if CANCEL_REQUESTED.is_set():
+                raise ProcessingCancelled(
+                    "Detención solicitada; no se reintentará la respuesta JSON inválida."
+                ) from failure
+            payload["max_tokens"] = 512
+            payload["messages"][0]["content"][0]["text"] += (
+                "\nReintento: devuelve únicamente un objeto JSON con la estructura "
+                "exacta solicitada, sin razonamiento ni texto adicional."
+            )
+            print(
+                f"Salida NIM inválida en etapa {stage} ({problem}; "
+                f"finish_reason={choice.get('finish_reason') or 'desconocido'}; "
+                f"caracteres={len(content)}); se reintentará una vez."
+            )
+            continue
+        raise ValueError(
+            f"NIM devolvió una salida no válida en etapa {stage} ({problem}; "
+            f"finish_reason={choice.get('finish_reason') or 'desconocido'}; "
+            f"caracteres={len(content)}): {failure}"
+        ) from failure
     raise RuntimeError(f"Se agotaron los intentos de NIM para la etapa {stage}.")
 
 

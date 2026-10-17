@@ -663,7 +663,9 @@ class CurationPipelineTests(unittest.TestCase):
             app.requests, "post", side_effect=post_response
         ) as post:
             with self.assertRaisesRegex(
-                ValueError, r"NIM devolvió JSON inválido en etapa colores"
+                ValueError,
+                r"NIM devolvió una salida no válida en etapa colores "
+                r"\(JSON malformado; finish_reason=length",
             ):
                 app.annotate_image(
                     self.image_path,
@@ -681,6 +683,60 @@ class CurationPipelineTests(unittest.TestCase):
         self.assertEqual(payload["response_format"], {"type": "json_object"})
         self.assertEqual(payload["max_tokens"], 256)
         self.assertEqual(payloads[1]["max_tokens"], 512)
+
+    def test_nemotron_vision_requests_no_reasoning_for_short_json_stages(self):
+        response = SimpleNamespace(
+            status_code=200,
+            raise_for_status=lambda: None,
+            json=lambda: {"choices": [{
+                "message": {"content": '{"colores":["azul"]}'},
+                "finish_reason": "stop",
+            }]},
+        )
+        with patch.object(app, "wait_for_nim_request_slot"), patch.object(
+            app.requests, "post", return_value=response
+        ) as post:
+            result = app.request_nim_stage_json(
+                self.image_path,
+                "data:image/png;base64,dGVzdA==",
+                "test-secret",
+                "https://test.invalid/v1",
+                app.NIM_VISION_MODEL,
+                "Devuelve un JSON conciso.",
+                "colores",
+            )
+
+        self.assertEqual(result, {"colores": ["azul"]})
+        payload = post.call_args.kwargs["json"]
+        self.assertEqual(payload["model"], app.NIM_VISION_MODEL)
+        self.assertEqual(payload["reasoning_effort"], "none")
+        self.assertEqual(payload["response_format"], {"type": "json_object"})
+
+    def test_nim_reports_valid_json_with_wrong_stage_shape_separately(self):
+        response = SimpleNamespace(
+            status_code=200,
+            raise_for_status=lambda: None,
+            json=lambda: {"choices": [{
+                "message": {"content": '{"colores":"azul"}'},
+                "finish_reason": "stop",
+            }]},
+        )
+        with patch.object(app, "wait_for_nim_request_slot"), patch.object(
+            app.requests, "post", return_value=response
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                r"estructura JSON inesperada; finish_reason=stop",
+            ):
+                app.request_nim_stage_json(
+                    self.image_path,
+                    "data:image/png;base64,dGVzdA==",
+                    "test-secret",
+                    "https://test.invalid/v1",
+                    "meta/llama-3.2-11b-vision-instruct",
+                    "Devuelve un JSON conciso.",
+                    "colores",
+                )
 
     def test_nim_json_response_is_parsed(self):
         response = SimpleNamespace(

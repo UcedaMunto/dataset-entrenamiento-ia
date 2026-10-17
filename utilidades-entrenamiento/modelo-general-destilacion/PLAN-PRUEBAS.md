@@ -21,6 +21,7 @@ Cobertura:
 - La imagen se envía sin modificar sus bytes y el MIME coincide con su formato real.
 - El prompt guardado y los vocabularios de propiedad quedan disponibles para el siguiente proceso de curación.
 - Ambos proveedores pueden proponer estilos y temporadas nuevos; los valores se fusionan sin duplicados en el catálogo incluso si la imagen se descarta. Los colores no admiten valores fuera de su catálogo.
+- El dashboard agrupa por proveedor/modelo las respuestas válidas guardadas, con conteos apta/descartada y fecha más reciente. Los resultados inválidos se mantienen visibles en el registro del lote, pero no se cuentan como respuestas válidas.
 
 Resultado esperado: todos los tests pasan; ningún test conoce ni carga API keys.
 
@@ -67,6 +68,8 @@ El curador aplica una separación mínima de 3 segundos entre inicios de peticio
 - Una respuesta inválida no genera análisis cacheado; la imagen se omite y el proceso prueba las siguientes del lote.
 - DeepSeek solicita `response_format=json_object`, 1.024 tokens iniciales y un reintento con 2.048 cuando el contenido está vacío o truncado; además envía `thinking: {type: disabled}` y el prompt incluye JSON y un ejemplo.
 - NIM envía cuatro solicitudes por imagen, en orden: colores, estilos, temporadas y validación/descripción. Cada etapa solicita JSON de hasta 256 tokens y reintenta una vez con 512 ante JSON inválido; comprobar que se combinan las cuatro respuestas, los inicios se separan al menos 3 segundos y una detención impide enviar las etapas siguientes.
+- El modelo NIM recomendado `nvidia/nemotron-3.5-super-vl-120b-a12b` envía `reasoning_effort=none`; verificar que no se agrega este parámetro a otros modelos. Antes de usarlo en un lote grande, probar una muestra pequeña y comprobar que está habilitado para la API key.
+- La salida NIM distingue JSON malformado de JSON sintácticamente válido con una estructura incorrecta, e incluye etapa, `finish_reason` y longitud en el log sin imprimir todo el contenido de la respuesta.
 - Con DeepSeek configurado, un descarte NIM debe iniciar una evaluación DeepSeek usando su propio fingerprint/cache. Si DeepSeek acepta, importar con proveedor/modelo DeepSeek; si también descarta, conservar ambos análisis y no importar. Sin clave DeepSeek, mantener el descarte NIM y mostrarlo explícitamente. Si ambos proveedores se seleccionan en paralelo, comprobar que no se dispara una llamada fallback redundante desde el proceso NIM.
 - NIM debe realizar cuatro etapas: colores, estilos, temporadas y validación/descripción. Debe pedir un máximo de 8 palabras en descripción y motivo de descarte, y máximo 2 valores por propiedad. Verificar que colores fuera del catálogo se ignoran, estilos/temporadas nuevos se conservan, y el resultado combinado respeta esos límites. DeepSeek debe conservar estilos/temporadas nuevos, restringir colores al catálogo y mantener descripción de hasta 12 palabras y hasta 3 valores por lista.
 - Tras responder una anotación, comprobar que estilo/temporada nuevos se guardan en `catalogo_propiedad`; en imágenes incorporadas, las sugerencias quedan también en `atributos_sugeridos`. El catálogo de color no cambia. El siguiente análisis debe recibir el catálogo actualizado en su prompt.
@@ -87,6 +90,7 @@ docker compose up -d dashboard
 Comprobar:
 
 - Los totales y conteos por clase coinciden con consultas de SQLite.
+- “Resultados válidos por modelo” coincide con un `GROUP BY proveedor, modelo` de `analisis_imagen`; aceptadas y descartadas suman el total válido y no se exponen API keys.
 - La sección de actividad muestra las últimas cinco prendas, propiedades, descripciones y proveedor/modelo; no hay imágenes si aún no se han importado.
 - Las pestañas muestran incorporadas y descartadas de cada proveedor. Las imágenes descartadas se resuelven por su ruta guardada o, para análisis antiguos, por el hash SHA-256 en las fuentes crudas.
 - La confirmación de envío remoto indica que NIM puede reenviar descartes a DeepSeek y que esto puede agregar costo/uso de imágenes.

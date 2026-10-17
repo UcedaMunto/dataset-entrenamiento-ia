@@ -483,6 +483,27 @@ def get_overview() -> dict:
         analysis_count = connection.execute(
             "SELECT COUNT(*) FROM analisis_imagen"
         ).fetchone()[0]
+        model_stats = [
+            {
+                "provider": row["proveedor"],
+                "model": row["modelo"],
+                "valid": row["total"],
+                "accepted": row["aceptadas"],
+                "rejected": row["descartadas"],
+                "latest_at": row["ultima_fecha"],
+            }
+            for row in connection.execute(
+                """
+                SELECT proveedor, modelo, COUNT(*) AS total,
+                       SUM(estado = 'aceptada') AS aceptadas,
+                       SUM(estado = 'descartada') AS descartadas,
+                       MAX(fecha_analisis) AS ultima_fecha
+                FROM analisis_imagen
+                GROUP BY proveedor, modelo
+                ORDER BY ultima_fecha DESC, proveedor, modelo
+                """
+            ).fetchall()
+        ]
 
     return {
         "total": total,
@@ -491,6 +512,7 @@ def get_overview() -> dict:
         "recent_images": recent,
         "estimate": estimate,
         "analysis_count": analysis_count,
+        "model_stats": model_stats,
         "prompt_instructions": instructions,
         "prompt_preview": prompt_preview,
         "properties": {"color": colors, "estilo": styles, "temporada": seasons},

@@ -68,6 +68,19 @@ class DashboardTests(unittest.TestCase):
                 VALUES (1, 'Camisa azul.', '{"colores":["azul"],"estilos":[]}', 'nim', 'vision-test')
                 """
             )
+            connection.executemany(
+                """
+                INSERT INTO analisis_imagen
+                    (huella_analisis, sha256, categoria, proveedor, modelo,
+                     version_prompt, estado, resultado_json)
+                VALUES (?, ?, 'camisa', ?, ?, '5', ?, '{}')
+                """,
+                [
+                    ("nim-accepted", "hash-1", "nim", "vision-test", "aceptada"),
+                    ("nim-rejected", "hash-2", "nim", "vision-test", "descartada"),
+                    ("deepseek-accepted", "hash-3", "deepseek", "flash-test", "aceptada"),
+                ],
+            )
             connection.commit()
 
         data = dashboard.get_overview()
@@ -76,6 +89,11 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(data["recent_images"][0]["proveedor"], "nim")
         self.assertEqual(data["recent_images"][0]["sugerencias_ia"]["colores"], ["azul"])
         self.assertIn("temporada", data["properties"])
+        stats = {(row["provider"], row["model"]): row for row in data["model_stats"]}
+        self.assertEqual(stats[("nim", "vision-test")]["valid"], 2)
+        self.assertEqual(stats[("nim", "vision-test")]["accepted"], 1)
+        self.assertEqual(stats[("nim", "vision-test")]["rejected"], 1)
+        self.assertEqual(stats[("deepseek", "flash-test")]["valid"], 1)
         self.assertTrue(data["providers"]["nim"])
         self.assertNotIn("do-not-return-this-secret", json.dumps(data))
 

@@ -23,6 +23,10 @@
     .type-list { display:grid; grid-template-columns:repeat(3,1fr); gap:10px }
     .type { background:#151d27; border:1px solid var(--line); border-radius:8px; padding:10px 12px; display:flex; justify-content:space-between; gap:8px }
     .type b { color:var(--accent) }
+    .table-wrap { overflow-x:auto }
+    table { width:100%; border-collapse:collapse; text-align:left }
+    th,td { padding:9px 12px; border-bottom:1px solid var(--line); white-space:nowrap }
+    th { color:var(--muted); font-size:13px; font-weight:600 }
     .section-head { display:flex; justify-content:space-between; align-items:center; gap:12px }
     .cards { display:grid; gap:12px }
     .item { display:grid; grid-template-columns:120px 1fr; gap:15px; border-top:1px solid var(--line); padding:14px 0 }
@@ -86,6 +90,16 @@
       <article class="stat"><span class="label">Prendas en el dataset</span><strong id="total">—</strong><div id="targetLabel" class="muted">Meta: 5.000</div><div class="progress"><span id="progress"></span></div><div id="progressLabel" class="muted"></div></article>
       <article class="stat"><span class="label">Tiempo estimado a 5.000</span><strong id="eta">—</strong><div id="etaDetail" class="muted">Esperando datos de análisis</div></article>
       <article class="stat"><span class="label">Análisis IA guardados</span><strong id="analysisCount">—</strong><div id="providerStatus" class="muted"></div></article>
+    </section>
+    <section class="panel" style="margin-bottom:18px">
+      <div class="section-head"><h2>Resultados válidos por modelo</h2><span class="muted">Solo respuestas estructuradas guardadas en SQLite</span></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Proveedor</th><th>Modelo</th><th>Respuestas válidas</th><th>Aptas</th><th>Descartadas</th><th>Última respuesta</th></tr></thead>
+          <tbody id="modelStats"></tbody>
+        </table>
+      </div>
+      <p class="muted" style="margin:10px 0 0">Los reintentos de formato JSON se muestran en el registro del lote activo; no cuentan como respuesta final guardada.</p>
     </section>
     <section class="panel" style="margin-bottom:18px">
       <div class="section-head"><h2>Prendas por tipo</h2><span class="muted">Incluye pendientes y aprobadas</span></div>
@@ -267,6 +281,25 @@
       $("analysisCount").textContent=data.analysis_count.toLocaleString("es-MX");
       const configured=Object.entries(data.providers).filter(([,value])=>value).map(([name])=>providerNames[name]);
       $("providerStatus").textContent=`Activo para nuevas ejecuciones: ${providerNames[data.selected_provider] || data.selected_provider}. Claves configuradas: ${configured.join(", ") || "ninguna"}.`;
+      const modelStats=$("modelStats"); modelStats.replaceChildren();
+      for (const stat of data.model_stats) {
+        const row=document.createElement("tr");
+        for (const value of [
+          providerNames[stat.provider] || stat.provider,
+          stat.model,
+          stat.valid.toLocaleString("es-MX"),
+          stat.accepted.toLocaleString("es-MX"),
+          stat.rejected.toLocaleString("es-MX"),
+          stat.latest_at || "—",
+        ]) {
+          const cell=document.createElement("td"); cell.textContent=value; row.append(cell);
+        }
+        modelStats.append(row);
+      }
+      if (!data.model_stats.length) {
+        const row=document.createElement("tr"); const cell=document.createElement("td");
+        cell.colSpan=6; cell.textContent="Aún no hay respuestas guardadas."; row.append(cell); modelStats.append(row);
+      }
       const list=$("typeCounts"); list.replaceChildren();
       for (const [code,name] of Object.entries(categoryNames)) { const row=document.createElement("div"); row.className="type"; const label=document.createElement("span"); label.textContent=name; const count=document.createElement("b"); count.textContent=(data.counts_by_type[code]||0).toLocaleString("es-MX"); row.append(label,count); list.append(row); }
       if(activeGarmentTab==="incorporated") renderRecent(data.recent_images);
