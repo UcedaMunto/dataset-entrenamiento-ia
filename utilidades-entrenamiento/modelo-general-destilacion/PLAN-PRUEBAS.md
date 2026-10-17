@@ -64,7 +64,9 @@ El curador aplica una separación mínima de 3 segundos entre inicios de peticio
 - Con key/endpoint inválidos, la ejecución debe exponer el error; no marcar una respuesta fallida como procesada.
 - Si la llamada API funciona pero falla la escritura de una imagen aceptada, el resultado del análisis permanece cacheado para reintentar la importación sin volver a pagar la inferencia.
 - Una respuesta inválida no genera análisis cacheado; la imagen se omite y el proceso prueba las siguientes del lote.
-- Para NVIDIA NIM la solicitud usa modo JSON y 512 tokens; una respuesta truncada debe reportar `finish_reason`/longitud sin guardar una decisión incompleta.
+- NIM y DeepSeek solicitan `response_format=json_object`, 1.024 tokens iniciales y un reintento con 2.048 cuando el contenido está vacío o truncado. DeepSeek debe enviar además `thinking: {type: disabled}` y el prompt debe incluir JSON y un ejemplo de salida.
+- NIM debe recibir un prompt de máximo 8 palabras para descripción y motivo de descarte, y máximo 2 colores y 2 estilos. Verificar también que los resultados se limitan a esos tamaños después de validar vocabularios; DeepSeek conserva descripción de hasta 12 palabras y 3 colores/estilos.
+- Mocks de ambos proveedores: una primera respuesta vacía/truncada seguida de JSON válido debe devolver anotación válida y demostrar el aumento de tokens; dos respuestas incompletas deben omitir la imagen sin guardarla y continuar el lote.
 - Dos inicios consecutivos de solicitudes NIM se separan como mínimo 3 segundos. Ante timeout, el proceso espera un intervalo aleatorio entre 30 y 120 segundos y reintenta la misma imagen exactamente una vez; si el segundo intento también expira, la omite y pasa a la siguiente muestra. Verificar orden de imágenes, espera y que solo se persista una decisión válida.
 - Con hashes ya importados al inicio del inventario, un límite de lote pequeño debe saltarlos antes de contar candidatos; el mismo tamaño de lote debe avanzar hasta llenar el cupo con imágenes nuevas. El resumen debe reportar las duplicadas omitidas antes de IA.
 - `motivo_descarte: null` se normaliza a cadena vacía solo para imágenes aceptadas; otros tipos inválidos se omiten sin frenar el lote.
@@ -88,10 +90,12 @@ Comprobar:
 - El modal de credenciales indica presencia de claves sin revelar sus valores. Reemplazar una key debe conservar campos vacíos, actualizar `.env` con modo 600 y no incluir el secreto en respuestas o logs.
 - Solicitudes POST con host/origen ajeno son rechazadas; las claves no existen en SQLite.
 - El servicio está publicado en `127.0.0.1`, no en `0.0.0.0` del host.
-- La tarjeta **Procesar imágenes ahora** ofrece solo fuentes importables, inicia lotes de 1–1.000 imágenes y muestra estado/salida mientras refresca los conteos.
-- **Detener envío** solicita la cancelación al proceso hijo; el estado pasa a “detención solicitada” y luego “detenido”. Una solicitud ya activa puede finalizar/importarse, pero no se inicia otra. Si se detiene durante el backoff de timeout, no se reintenta ni se avanza a otra imagen.
+- La tarjeta **Procesar imágenes ahora** ofrece solo fuentes importables, inicia hasta dos lotes en paralelo (uno por proveedor remoto), cada uno con límite de 1–5.000 imágenes, y presenta estado/salida por separado.
+- Con NIM y DeepSeek seleccionados, validar que se crean dos procesos independientes con el mismo límite y que cada uno llama solo a su proveedor.
+- Enviar ambos proveedores sobre imágenes comunes y verificar que una imagen se incorpora una sola vez aunque los dos procesos terminen su análisis; la escritura SQLite debe serializarse y el segundo importador debe registrar el duplicado.
+- **Detener envío** solicita la cancelación solo al proceso proveedor elegido; el estado pasa a “detención solicitada” y luego “detenido”. Una solicitud ya activa puede finalizar/importarse, pero no se inicia otra. Si se detiene durante el backoff de timeout, no se reintenta ni se avanza a otra imagen. La otra ejecución en paralelo debe continuar.
 - Sin IA exige confirmación de escritura; NIM/DeepSeek además requieren clave configurada y autorización explícita de envío remoto. OpenAI permanece fuera de la selección hasta habilitarlo por separado.
-- Un segundo lote se rechaza mientras el anterior siga activo; errores y claves deben estar ausentes de cualquier registro mostrado.
+- Un segundo lote del mismo proveedor se rechaza mientras ese proveedor siga activo; se permite lanzar el otro proveedor en paralelo. Errores y claves deben estar ausentes de cualquier registro mostrado.
 
 ## Criterios de aceptación
 
@@ -102,3 +106,5 @@ Comprobar:
 5. No se importan imágenes de clases fuera del mapeo ni mayores de 200.000 bytes.
 6. Las muestras aprobadas por la IA continúan pendientes de revisión humana y no habilitadas para entrenamiento.
 7. El dashboard solo responde en localhost, las claves se ocultan y los cambios de prompt/vocabulario afectan los procesos futuros.
+8. Cada proveedor acepta un límite de hasta 5.000 prendas; al seleccionar NIM y DeepSeek se inician trabajos paralelos independientes.
+9. La importación concurrente de un mismo hash crea una sola prenda y una sola imagen registrada en SQLite.

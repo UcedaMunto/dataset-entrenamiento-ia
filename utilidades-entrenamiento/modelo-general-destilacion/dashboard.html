@@ -29,10 +29,13 @@
     .item img { width:120px; height:120px; object-fit:contain; background:#0e131a; border-radius:8px }
     .item h3 { margin-bottom:4px; font-size:16px } .pill { display:inline-block; border:1px solid var(--line); border-radius:20px; padding:2px 9px; color:var(--muted); font-size:12px; margin:2px 4px 2px 0 }
     .props { margin:7px 0 } .empty { color:var(--muted); padding:20px 0 }
-    .job-panel { margin-bottom:18px; border-color:#218c6d } .job-grid { display:grid; grid-template-columns:2fr 1fr 1fr; gap:12px; align-items:end; margin-top:14px }
+    .job-panel { margin-bottom:18px; border-color:#218c6d } .job-grid { display:grid; grid-template-columns:2fr 1fr; gap:12px; align-items:end; margin-top:14px }
     .job-grid label { margin:0 0 5px } .job-checks { display:grid; gap:8px; margin:14px 0 } .job-checks label { display:flex; gap:9px; align-items:flex-start; margin:0; font-weight:400 }
     .job-checks input { width:auto; margin-top:5px } .job-console { min-height:46px; max-height:190px; margin-bottom:0 }
     .job-state { font-weight:700 } .job-state.running { color:var(--warning) } .job-state.completed { color:var(--accent) } .job-state.failed { color:#ff9797 }
+    .provider-jobs { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:12px; margin-top:16px }
+    .provider-job { min-width:0; border:1px solid var(--line); border-radius:9px; padding:14px; background:#151d27 }
+    .provider-job h3 { margin:0 } .provider-job pre { min-height:50px; max-height:170px; margin:10px 0 0 }
     dialog { width:min(720px,calc(100vw - 28px)); border:1px solid #405064; border-radius:12px; background:var(--panel); color:var(--text); padding:0; box-shadow:0 18px 60px #0009 }
     dialog::backdrop { background:#05080dcc }
     .modal-head,.modal-body,.modal-foot { padding:16px 20px } .modal-head,.modal-foot { border-bottom:1px solid var(--line) } .modal-foot { border:0; border-top:1px solid var(--line); justify-content:flex-end }
@@ -61,17 +64,20 @@
       <form id="ingestForm">
         <div class="job-grid">
           <div><label for="sourceSelect">Fuente</label><select id="sourceSelect" required></select></div>
-          <div><label for="ingestProvider">Análisis</label><select id="ingestProvider"><option value="none">Sin IA (local)</option><option value="nim">NVIDIA NIM</option><option value="deepseek">DeepSeek</option></select></div>
-          <div><label for="batchLimit">Máximo de imágenes</label><input id="batchLimit" type="number" min="1" max="1000" value="10" required></div>
+          <div><label for="batchLimit">Máximo de imágenes por proveedor</label><input id="batchLimit" type="number" min="1" max="5000" value="10" required></div>
         </div>
         <div class="job-checks">
+          <strong>Proveedores (puedes ejecutar NIM y DeepSeek en paralelo)</strong>
+          <label><input id="providerNim" type="checkbox" checked><span>NVIDIA NIM</span></label>
+          <label><input id="providerDeepseek" type="checkbox"><span>DeepSeek</span></label>
+          <label><input id="providerNone" type="checkbox"><span>Sin IA (solo importación local; no combinar con APIs)</span></label>
           <label><input id="confirmWrite" type="checkbox" checked required><span>Confirmo que el lote puede copiar imágenes al dataset y escribir en SQLite.</span></label>
-          <label id="remoteConsentRow" hidden><input id="confirmRemote" type="checkbox" checked><span>Autorizo enviar hasta el máximo indicado a una IA externa. Puede consumir cuota o generar cargos; revisé el proveedor elegido.</span></label>
+          <label id="remoteConsentRow" hidden><input id="confirmRemote" type="checkbox" checked><span>Autorizo enviar cada imagen seleccionada a los proveedores externos marcados. Si selecciono ambos, cada uno puede analizar hasta el máximo indicado; puede duplicarse el consumo o costo.</span></label>
         </div>
-        <div class="row"><button id="startIngestButton" class="primary" type="submit">▶ Iniciar procesamiento</button><button id="stopIngestButton" class="danger" type="button" disabled>■ Detener envío</button><span id="jobMessage" role="status" class="muted">Elige una fuente y confirma antes de iniciar.</span></div>
-        <p class="muted">Al detener, se evita iniciar más solicitudes. La imagen que ya esté siendo analizada puede terminar antes de cerrar el lote.</p>
+        <div class="row"><button id="startIngestButton" class="primary" type="submit">▶ Iniciar ejecuciones seleccionadas</button><span id="jobMessage" role="status" class="muted">Selecciona uno o ambos proveedores.</span></div>
+        <p class="muted">El límite aplica por proveedor: seleccionando ambos se pueden procesar hasta 10.000 análisis combinados. Detener un proveedor no afecta al otro. La imagen que ya esté en análisis puede terminar antes de cerrar ese lote.</p>
       </form>
-      <pre id="jobLogs" class="job-console" aria-live="polite">El registro del proceso aparecerá aquí.</pre>
+      <div id="providerJobs" class="provider-jobs" aria-live="polite"></div>
     </section>
     <section class="grid">
       <article class="stat"><span class="label">Prendas en el dataset</span><strong id="total">—</strong><div id="targetLabel" class="muted">Meta: 5.000</div><div class="progress"><span id="progress"></span></div><div id="progressLabel" class="muted"></div></article>
@@ -135,7 +141,6 @@
   <script>
     const $ = (id) => document.getElementById(id);
     let latestData = null;
-    let providerInitialized = false;
     const categoryNames = {
       abrigo:"Abrigo", blusa:"Blusa", camisa:"Camisa", chaqueta:"Chaqueta",
       falda:"Falda", pantalon:"Pantalón", short:"Short", sueter:"Suéter", vestido:"Vestido"
@@ -182,12 +187,9 @@
       sourceSelect.replaceChildren();
       for (const source of data.sources) { const option=document.createElement("option"); option.value=source.id; option.textContent=source.label; sourceSelect.append(option); }
       if (data.sources.some(source=>source.id===previousSource)) sourceSelect.value=previousSource;
-      const providerSelect=$("ingestProvider");
-      for (const option of providerSelect.options) option.disabled=option.value!=="none" && !data.providers[option.value];
-      if (providerSelect.value!=="none" && !data.providers[providerSelect.value]) providerSelect.value="none";
-      if (!providerInitialized) {
-        if (["nim","deepseek"].includes(data.selected_provider) && data.providers[data.selected_provider]) providerSelect.value=data.selected_provider;
-        providerInitialized=true;
+      for (const [provider,id] of [["nim","providerNim"],["deepseek","providerDeepseek"]]) {
+        $(id).disabled=!data.providers[provider];
+        if (!data.providers[provider]) $(id).checked=false;
       }
       syncRemoteConsent();
       $("total").textContent=data.total.toLocaleString("es-MX");
@@ -205,30 +207,49 @@
       renderRecent(data.recent_images);
     }
     async function refresh() { try { render(await request("/api/overview")); setStatus("status",`Actualizado ${new Date().toLocaleTimeString("es-MX")}`); } catch(error) { setStatus("status",error.message,"error"); } }
-    function renderJob(job) {
-      const stateNames={idle:"Sin iniciar",running:job.cancellation_requested?"Detención solicitada":"En curso",completed:"Finalizado",cancelled:"Detenido",failed:"Error"};
-      $("jobState").textContent=stateNames[job.status] || job.status;
-      $("jobState").className=`job-state ${job.status}`;
-      $("jobMessage").textContent=job.message;
-      $("jobMessage").className=job.status==="failed"?"error":["completed","cancelled"].includes(job.status)?"success":"muted";
-      $("startIngestButton").disabled=job.status==="running";
-      $("startIngestButton").textContent=job.status==="running"?"Procesamiento en curso…":"▶ Iniciar procesamiento";
-      $("stopIngestButton").disabled=job.status!=="running" || job.cancellation_requested;
-      $("stopIngestButton").textContent=job.cancellation_requested?"Detención solicitada…":"■ Detener envío";
-      const logText=(job.logs || []).join("\n");
-      $("jobLogs").textContent=logText || (job.status==="running"?"Esperando salida del proceso…":"El registro del proceso aparecerá aquí.");
-      $("jobLogs").scrollTop=$("jobLogs").scrollHeight;
+    const providerCheckboxes = {nim:"providerNim",deepseek:"providerDeepseek",none:"providerNone"};
+    function renderJobs(jobs) {
+      const states=Object.fromEntries(jobs.map(job=>[job.provider,job]));
+      const running=jobs.filter(job=>job.status==="running");
+      $("jobState").textContent=running.length?`${running.length} ejecución${running.length===1?"":"es"} activa${running.length===1?"":"s"}`:"Sin ejecuciones activas";
+      $("jobState").className=`job-state ${running.length?"running":""}`;
+      const root=$("providerJobs"); root.replaceChildren();
+      for(const provider of ["nim","deepseek","none"]) {
+        const job=states[provider] || {provider,status:"idle",message:"Todavía no se ha iniciado un procesamiento.",logs:[]};
+        const card=document.createElement("article"); card.className="provider-job";
+        const heading=document.createElement("div"); heading.className="section-head";
+        const title=document.createElement("h3"); title.textContent=providerNames[provider];
+        const state=document.createElement("span"); state.className=`job-state ${job.status}`;
+        state.textContent=job.status==="running"?(job.cancellation_requested?"Detención solicitada":"En curso"):{idle:"Sin iniciar",completed:"Finalizado",cancelled:"Detenido",failed:"Error"}[job.status]||job.status;
+        heading.append(title,state); card.append(heading);
+        const detail=document.createElement("p"); detail.className=job.status==="failed"?"error":"muted";
+        detail.textContent=job.message; detail.style.margin="8px 0";
+        if(job.limit) detail.textContent+=` · límite ${job.limit.toLocaleString("es-MX")}`;
+        card.append(detail);
+        const stop=document.createElement("button"); stop.type="button"; stop.className="danger"; stop.dataset.provider=provider;
+        stop.textContent=job.cancellation_requested?"Detención solicitada…":"■ Detener envío";
+        stop.disabled=job.status!=="running"||job.cancellation_requested; stop.addEventListener("click",()=>stopJob(provider)); card.append(stop);
+        const logs=document.createElement("pre"); logs.textContent=(job.logs||[]).join("\n")||(job.status==="running"?"Esperando salida del proceso…":"El registro del proceso aparecerá aquí.");
+        card.append(logs); root.append(card);
+        if(providerCheckboxes[provider]) $(providerCheckboxes[provider]).disabled=job.status==="running"||(provider!=="none"&&latestData&&!latestData.providers[provider]);
+      }
+      $("startIngestButton").disabled=false;
     }
-    async function refreshJob() {
+    let previousJobs={};
+    async function refreshJobs() {
       try {
-        const job=await request("/api/job");
-        const wasRunning=$("jobState").classList.contains("running");
-        renderJob(job);
-        if (wasRunning && job.status!=="running") await refresh();
+        const data=await request("/api/jobs");
+        renderJobs(data.jobs);
+        const completed=data.jobs.some(job=>previousJobs[job.provider]==="running"&&job.status!=="running");
+        previousJobs=Object.fromEntries(data.jobs.map(job=>[job.provider,job.status]));
+        if(completed) await refresh();
       } catch(error) { setStatus("jobMessage",error.message,"error"); }
     }
     function syncRemoteConsent() {
-      const remote=$("ingestProvider").value!=="none";
+      const none=$("providerNone").checked;
+      if(none) { $("providerNim").checked=false; $("providerDeepseek").checked=false; }
+      $("providerNone").disabled=$("providerNim").checked||$("providerDeepseek").checked;
+      const remote=$("providerNim").checked||$("providerDeepseek").checked;
       $("remoteConsentRow").hidden=!remote;
       $("confirmRemote").required=remote;
     }
@@ -236,29 +257,35 @@
     function closeDialogs() { document.querySelectorAll("dialog").forEach(dialog=>dialog.close()); }
     document.querySelectorAll(".close").forEach(button=>button.addEventListener("click",closeDialogs));
     $("refreshButton").addEventListener("click",refresh);
-    $("ingestProvider").addEventListener("change",syncRemoteConsent);
+    ["providerNim","providerDeepseek","providerNone"].forEach(id=>$(id).addEventListener("change",syncRemoteConsent));
     $("ingestForm").addEventListener("submit",async(event)=>{
       event.preventDefault();
       const button=$("startIngestButton"); button.disabled=true;
       try {
-        const job=await request("/api/ingest",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
-          source:$("sourceSelect").value,provider:$("ingestProvider").value,
+        const providers=Object.entries(providerCheckboxes).filter(([,id])=>$(id).checked).map(([provider])=>provider);
+        if(!providers.length) throw new Error("Selecciona NVIDIA NIM, DeepSeek o Sin IA.");
+        const active=Object.entries(previousJobs).filter(([,status])=>status==="running").map(([provider])=>provider);
+        const available=providers.filter(provider=>!active.includes(provider));
+        if(!available.length) throw new Error("Las ejecuciones seleccionadas ya están activas.");
+        const result=await request("/api/ingest",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
+          source:$("sourceSelect").value,providers:available,
           limit:Number($("batchLimit").value),confirm_write:$("confirmWrite").checked,
           confirm_remote:$("confirmRemote").checked
         })});
-        renderJob(job);
-        $("confirmWrite").checked=false; $("confirmRemote").checked=false;
+        renderJobs(result.jobs);
+        setStatus("jobMessage",available.length===2?"NIM y DeepSeek iniciados en paralelo.":`${providerNames[available[0]]} iniciado.`,"success");
+        refreshJobs();
       } catch(error) { setStatus("jobMessage",error.message,"error"); button.disabled=false; }
     });
-    $("stopIngestButton").addEventListener("click",async()=>{
-      const button=$("stopIngestButton"); button.disabled=true;
+    async function stopJob(provider) {
       try {
-        renderJob(await request("/api/stop",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"}));
+        await request("/api/stop",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({provider})});
+        await refreshJobs();
       } catch(error) {
         setStatus("jobMessage",error.message,"error");
-        await refreshJob();
+        await refreshJobs();
       }
-    });
+    }
     $("promptButton").addEventListener("click",async()=>{ try { latestData=await request("/api/overview"); $("promptText").value=latestData.prompt_instructions; $("promptPreview").textContent=latestData.prompt_preview; setStatus("promptStatus",""); openDialog("promptModal"); } catch(e) { setStatus("status",e.message,"error"); } });
     $("promptText").addEventListener("input",()=>{ if(latestData) { const marker="\n\nInstrucciones:\n"; const start=latestData.prompt_preview.indexOf(marker); const end=latestData.prompt_preview.indexOf("\n\nDevuelve solo JSON",start); $("promptPreview").textContent=`${latestData.prompt_preview.slice(0,start)}${marker}${$("promptText").value}${latestData.prompt_preview.slice(end)}`; } });
     $("promptForm").addEventListener("submit",async(event)=>{ event.preventDefault(); try { await request("/api/prompt",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({instructions:$("promptText").value})}); setStatus("promptStatus","Prompt guardado.","success"); await refresh(); } catch(e) { setStatus("promptStatus",e.message,"error"); } });
@@ -268,7 +295,7 @@
     $("keysButton").addEventListener("click",async()=>{ try { latestData=await request("/api/overview"); $("providerSelect").value=latestData.selected_provider; $("keyStatus").textContent=Object.entries(latestData.providers).map(([name,configured])=>`${providerNames[name]}: ${configured?"configurada":"sin configurar"}`).join(" · "); $("nimKey").value=""; $("deepseekKey").value=""; $("openaiKey").value=""; setStatus("keysStatus",""); openDialog("keysModal"); } catch(e) { setStatus("status",e.message,"error"); } });
     $("keysForm").addEventListener("submit",async(event)=>{ event.preventDefault(); const payload={provider:$("providerSelect").value,NVIDIA_NIM_API_KEY:$("nimKey").value,DEEPSEEK_API_KEY:$("deepseekKey").value,OPENAI_API_KEY:$("openaiKey").value}; try { await request("/api/credentials",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}); $("nimKey").value=""; $("deepseekKey").value=""; $("openaiKey").value=""; setStatus("keysStatus","Configuración guardada; las claves no se mostrarán nuevamente.","success"); await refresh(); } catch(e) { setStatus("keysStatus",e.message,"error"); } });
     syncRemoteConsent();
-    refresh(); refreshJob(); setInterval(refresh,5000); setInterval(refreshJob,2000);
+    refresh(); refreshJobs(); setInterval(refresh,5000); setInterval(refreshJobs,2000);
   </script>
 </body>
 </html>

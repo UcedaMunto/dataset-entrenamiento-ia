@@ -24,31 +24,42 @@ DATABASE = DATASET_ROOT / "metadata.sqlite"
 PORT = int(os.environ.get("DASHBOARD_PORT", "8787"))
 HOST = os.environ.get("DASHBOARD_HOST", "127.0.0.1")
 TARGET_COUNT = 5000
-MAX_BATCH_SIZE = 1000
+MAX_BATCH_SIZE = 5000
 PROVIDERS = {
     "openai": "OPENAI_API_KEY",
     "nim": "NVIDIA_NIM_API_KEY",
     "deepseek": "DEEPSEEK_API_KEY",
 }
 JOB_LOCK = threading.Lock()
-JOB_PROCESS: subprocess.Popen | None = None
-JOB_STATE = {
-    "status": "idle",
-    "source": None,
-    "provider": None,
-    "limit": None,
-    "started_at": None,
-    "finished_at": None,
-    "exit_code": None,
-    "cancellation_requested": False,
-    "message": "Todavía no se ha iniciado un procesamiento.",
-    "logs": [],
-}
+JOB_PROCESSES: dict[str, subprocess.Popen] = {}
+JOB_STATES: dict[str, dict] = {}
 
 
-def get_job_status() -> dict:
+def _empty_job(provider: str) -> dict:
+    return {
+        "status": "idle",
+        "source": None,
+        "provider": provider,
+        "limit": None,
+        "started_at": None,
+        "finished_at": None,
+        "exit_code": None,
+        "cancellation_requested": False,
+        "message": "Todavía no se ha iniciado un procesamiento.",
+        "logs": [],
+    }
+
+
+def get_job_status(provider: str | None = None) -> dict:
     with JOB_LOCK:
-        return {**JOB_STATE, "logs": list(JOB_STATE["logs"])}
+        if provider:
+            state = JOB_STATES.get(provider, _empty_job(provider))
+            return {**state, "logs": list(state["logs"])}
+        jobs = []
+        for name in ("nim", "deepseek", "none"):
+            state = JOB_STATES.get(name, _empty_job(name))
+            jobs.append({**state, "logs": list(state["logs"])})
+        return {"jobs": jobs}
 
 
 def validate_ingest_request(payload: dict) -> tuple[str, str, int, dict[str, str]]:
@@ -76,7 +87,7 @@ def validate_ingest_request(payload: dict) -> tuple[str, str, int, dict[str, str
     return source_id, provider, limit, env_values
 
 
-def _append_job_log(line: str, secrets: list[str]) -> None:
+def _append_job_log(provider: str, line: str, secrets: list[str]) -> None:
     for secret in secrets:
         if secret:
             line = line.replace(secret, "[REDACTED]")
@@ -84,12 +95,17 @@ def _append_job_log(line: str, secrets: list[str]) -> None:
     if not line:
         return
     with JOB_LOCK:
-        JOB_STATE["logs"].append(line)
-        JOB_STATE["logs"] = JOB_STATE["logs"][-80:]
+        state = JOB_STATES[provider]
+        state["logs"].append(line)
+        state["logs"] = state["logs"][-80:]
 
 
-def _run_ingest(command: list[str], environment: dict[str, str], secrets: list[str]) -> None:
-    global JOB_PROCESS
+def _run_ingest(
+    provider: str,
+    command: list[str],
+    environment: dict[str, str],
+    secrets: list[str],
+) -> None:
     process = None
     try:
         process = subprocess.Popen(
@@ -104,8 +120,8 @@ def _run_ingest(command: list[str], environment: dict[str, str], secrets: list[s
             bufsize=1,
         )
         with JOB_LOCK:
-            JOB_PROCESS = process
-            cancel_now = JOB_STATE["cancellation_requested"]
+            JOB_PROCESSES[provider] = process
+            cancel_now = JOB_STATES[provider]["cancellation_requested"]
             if cancel_now:
                 try:
                     process.send_signal(signal.SIGTERM)
@@ -115,110 +131,137 @@ def _run_ingest(command: list[str], environment: dict[str, str], secrets: list[s
             if process.stdout is None:
                 raise RuntimeError("No se pudo abrir la salida del proceso de curación.")
             for line in process.stdout:
-                _append_job_log(line, secrets)
+                _append_job_log(provider, line, secrets)
             exit_code = process.wait()
         finished = datetime.now().astimezone().isoformat(timespec="seconds")
         with JOB_LOCK:
-            cancelled = JOB_STATE["cancellation_requested"]
-            JOB_STATE["status"] = (
+            state = JOB_STATES[provider]
+            cancelled = state["cancellation_requested"]
+            state["status"] = (
                 "cancelled" if cancelled else "completed" if exit_code == 0 else "failed"
             )
-            JOB_STATE["finished_at"] = finished
-            JOB_STATE["exit_code"] = exit_code
+            state["finished_at"] = finished
+            state["exit_code"] = exit_code
             if cancelled:
-                JOB_STATE["message"] = "Procesamiento detenido de forma segura."
+                state["message"] = "Procesamiento detenido de forma segura."
             elif exit_code == 0:
-                JOB_STATE["message"] = "Procesamiento finalizado correctamente."
+                state["message"] = "Procesamiento finalizado correctamente."
             else:
-                JOB_STATE["message"] = (
+                state["message"] = (
                     f"El procesamiento terminó con error (código {exit_code}). Revisa el registro."
                 )
     except (OSError, RuntimeError, subprocess.SubprocessError) as error:
         with JOB_LOCK:
-            JOB_STATE["status"] = "failed"
-            JOB_STATE["finished_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
-            JOB_STATE["message"] = f"No se pudo ejecutar el procesamiento: {error}"
+            state = JOB_STATES[provider]
+            state["status"] = "failed"
+            state["finished_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
+            state["message"] = f"No se pudo ejecutar el procesamiento: {error}"
     finally:
         with JOB_LOCK:
-            if JOB_PROCESS is process:
-                JOB_PROCESS = None
+            if JOB_PROCESSES.get(provider) is process:
+                JOB_PROCESSES.pop(provider, None)
 
 
-def stop_ingest() -> dict:
-    global JOB_PROCESS
+def stop_ingest(provider: str) -> dict:
     with JOB_LOCK:
-        if JOB_STATE["status"] != "running":
-            raise ValueError("No hay un procesamiento activo para detener.")
-        if JOB_STATE["cancellation_requested"]:
-            return {**JOB_STATE, "logs": list(JOB_STATE["logs"])}
+        state = JOB_STATES.get(provider)
+        if state is None or state["status"] != "running":
+            raise ValueError(f"No hay un procesamiento activo de {provider} para detener.")
+        if state["cancellation_requested"]:
+            return {**state, "logs": list(state["logs"])}
 
-        JOB_STATE["cancellation_requested"] = True
-        JOB_STATE["message"] = (
+        state["cancellation_requested"] = True
+        state["message"] = (
             "Detención solicitada; se espera a que termine la petición de IA actual."
         )
-        process = JOB_PROCESS
+        process = JOB_PROCESSES.get(provider)
         if process is not None:
             try:
                 process.send_signal(signal.SIGTERM)
             except ProcessLookupError:
                 pass
             except OSError as error:
-                JOB_STATE["cancellation_requested"] = False
-                JOB_STATE["message"] = f"No se pudo solicitar la detención: {error}"
-                raise RuntimeError(JOB_STATE["message"]) from error
-        return {**JOB_STATE, "logs": list(JOB_STATE["logs"])}
+                state["cancellation_requested"] = False
+                state["message"] = f"No se pudo solicitar la detención: {error}"
+                raise RuntimeError(state["message"]) from error
+        return {**state, "logs": list(state["logs"])}
 
 
 def start_ingest(payload: dict) -> dict:
-    source_id, provider, limit, env_values = validate_ingest_request(payload)
+    selected_providers = payload.get("providers")
+    if selected_providers is None:
+        selected_providers = [payload.get("provider")]
+    if (
+        not isinstance(selected_providers, list)
+        or not selected_providers
+        or len(selected_providers) > 2
+        or any(not isinstance(provider, str) for provider in selected_providers)
+        or len(set(selected_providers)) != len(selected_providers)
+    ):
+        raise ValueError("Selecciona uno o dos proveedores distintos.")
+    if any(provider not in {"none", "nim", "deepseek"} for provider in selected_providers):
+        raise ValueError("Proveedor inválido; elige Sin IA, NVIDIA NIM o DeepSeek.")
+    if "none" in selected_providers and len(selected_providers) != 1:
+        raise ValueError("El modo local no se puede combinar con proveedores remotos.")
+
+    validated = []
+    for provider in selected_providers:
+        provider_payload = {**payload, "provider": provider}
+        validated.append(validate_ingest_request(provider_payload))
+    source_id, _, limit, env_values = validated[0]
+
     with JOB_LOCK:
-        if JOB_STATE["status"] == "running":
-            raise ValueError("Ya hay un procesamiento en curso.")
         started = datetime.now().astimezone().isoformat(timespec="seconds")
-        JOB_STATE.update({
-            "status": "running",
-            "source": source_id,
-            "provider": provider,
-            "limit": limit,
-            "started_at": started,
-            "finished_at": None,
-            "exit_code": None,
-            "cancellation_requested": False,
-            "message": "Procesamiento iniciado; esperando actividad.",
-            "logs": [],
-        })
+        active = [
+            provider for provider in selected_providers
+            if JOB_STATES.get(provider, {}).get("status") == "running"
+        ]
+        if active:
+            raise ValueError(
+                f"Ya hay un procesamiento activo para: {', '.join(active)}."
+            )
+        for provider in selected_providers:
+            JOB_STATES[provider] = {
+                **_empty_job(provider),
+                "status": "running",
+                "source": source_id,
+                "limit": limit,
+                "started_at": started,
+                "message": "Procesamiento iniciado; esperando actividad.",
+            }
 
     environment = os.environ.copy()
     environment.update(env_values)
     environment["DATASET_ROOT"] = str(DATASET_ROOT)
     environment["PYTHONUNBUFFERED"] = "1"
-    command = [
-        sys.executable,
-        str(ROOT / "app.py"),
-        "ingest",
-        "--source", source_id,
-        "--provider", provider,
-        "--limit", str(limit),
-        "--execute",
-    ]
-    if provider != "none":
-        command.append("--allow-remote")
     secrets = [env_values.get(name, "") for name in PROVIDERS.values()]
-    worker = threading.Thread(
-        target=_run_ingest,
-        args=(command, environment, secrets),
-        name="dashboard-ingest",
-        daemon=True,
-    )
-    try:
-        worker.start()
-    except RuntimeError:
-        with JOB_LOCK:
-            JOB_STATE["status"] = "failed"
-            JOB_STATE["finished_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
-            JOB_STATE["message"] = "No se pudo iniciar el proceso de curación."
-        raise
-    return get_job_status()
+    for provider in selected_providers:
+        command = [
+            sys.executable,
+            str(ROOT / "app.py"),
+            "ingest",
+            "--source", source_id,
+            "--provider", provider,
+            "--limit", str(limit),
+            "--execute",
+        ]
+        if provider != "none":
+            command.append("--allow-remote")
+        worker = threading.Thread(
+            target=_run_ingest,
+            args=(provider, command, environment, secrets),
+            name=f"dashboard-ingest-{provider}",
+            daemon=True,
+        )
+        try:
+            worker.start()
+        except RuntimeError as error:
+            with JOB_LOCK:
+                state = JOB_STATES[provider]
+                state["status"] = "failed"
+                state["finished_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
+                state["message"] = f"No se pudo iniciar el proceso de curación: {error}"
+    return {"jobs": [get_job_status(provider) for provider in selected_providers]}
 
 
 def connect_database() -> sqlite3.Connection:
@@ -426,7 +469,9 @@ def get_overview() -> dict:
             providers = {name: False for name in PROVIDERS}
             selected_provider = "none"
 
-        prompt_preview = app.build_prompt(instructions, "camisa", colors, styles)
+        prompt_preview = app.build_annotation_prompt(
+            instructions, "camisa", colors, styles, selected_provider
+        )
         estimate = estimate_completion(connection, total)
         analysis_count = connection.execute(
             "SELECT COUNT(*) FROM analisis_imagen"
@@ -510,8 +555,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if path == "/api/overview":
                 self._send_json(200, get_overview())
                 return
-            if path == "/api/job":
+            if path == "/api/jobs":
                 self._send_json(200, get_job_status())
+                return
+            if path == "/api/job":
+                self._send_json(200, get_job_status("nim"))
                 return
             match = re.fullmatch(r"/api/image/([0-9]+)", path)
             if match:
@@ -572,7 +620,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
             elif path == "/api/ingest":
                 self._send_json(202, start_ingest(payload))
             elif path == "/api/stop":
-                self._send_json(202, stop_ingest())
+                provider = payload.get("provider")
+                if not isinstance(provider, str):
+                    raise ValueError("Indica el proveedor que quieres detener.")
+                self._send_json(202, stop_ingest(provider))
             else:
                 self._send_json(404, {"error": "Ruta no encontrada."})
         except (OSError, sqlite3.Error, ValueError, KeyError) as error:

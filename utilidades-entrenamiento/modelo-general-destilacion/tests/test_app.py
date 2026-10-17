@@ -1,10 +1,13 @@
 import base64
+import copy
 import hashlib
 import json
 import os
 import sqlite3
 import tempfile
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -152,8 +155,8 @@ class CurationPipelineTests(unittest.TestCase):
             "colores": ["azul"],
             "estilos": [],
         }
-        prompt = app.build_prompt(
-            app.DEFAULT_PROMPT_INSTRUCTIONS, "camisa", ["azul"], ["casual"]
+        prompt = app.build_annotation_prompt(
+            app.DEFAULT_PROMPT_INSTRUCTIONS, "camisa", ["azul"], ["casual"], "nim"
         )
         fingerprint = app.analysis_fingerprint(
             self.digest, "camisa", "nim", "test-model", prompt
@@ -173,8 +176,8 @@ class CurationPipelineTests(unittest.TestCase):
 
     def test_cached_rejection_is_not_sent_or_imported_again(self):
         result = {"apta": False, "motivo_descarte": "No corresponde a camisa."}
-        prompt = app.build_prompt(
-            app.DEFAULT_PROMPT_INSTRUCTIONS, "camisa", ["azul"], ["casual"]
+        prompt = app.build_annotation_prompt(
+            app.DEFAULT_PROMPT_INSTRUCTIONS, "camisa", ["azul"], ["casual"], "nim"
         )
         fingerprint = app.analysis_fingerprint(
             self.digest, "camisa", "nim", "test-model", prompt
@@ -204,6 +207,37 @@ class CurationPipelineTests(unittest.TestCase):
         annotate.assert_called_once()
         with sqlite3.connect(self.database) as connection:
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM analisis_imagen").fetchone()[0], 1)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM prenda_imagen").fetchone()[0], 1)
+
+    def test_parallel_imports_of_same_hash_create_only_one_dataset_item(self):
+        barrier = threading.Barrier(2)
+
+        def import_concurrently():
+            created_files = []
+            with sqlite3.connect(self.database, timeout=10) as connection:
+                connection.execute("PRAGMA foreign_keys = ON")
+                barrier.wait()
+                imported = app.import_one(
+                    connection,
+                    self.item,
+                    "fixture",
+                    self.source,
+                    self.dataset_root,
+                    None,
+                    "none",
+                    "none",
+                    created_files,
+                )
+                if imported:
+                    connection.commit()
+                return imported
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(lambda _: import_concurrently(), range(2)))
+
+        self.assertEqual(sorted(results), [False, True])
+        with sqlite3.connect(self.database) as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM prenda").fetchone()[0], 1)
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM prenda_imagen").fetchone()[0], 1)
 
     def test_null_discard_reason_is_normalized_for_accepted_image(self):
@@ -484,11 +518,17 @@ class CurationPipelineTests(unittest.TestCase):
                 }]
             },
         )
+        payloads = []
+
+        def post_response(*args, **kwargs):
+            payloads.append(copy.deepcopy(kwargs["json"]))
+            return response
+
         with patch.object(app, "wait_for_nim_request_slot"), patch.object(
-            app.requests, "post", return_value=response
+            app.requests, "post", side_effect=post_response
         ) as post:
             with self.assertRaisesRegex(
-                ValueError, r"finish_reason=length, caracteres=39"
+                ValueError, r"Respuesta truncada por límite de tokens.*max_tokens=2048"
             ):
                 app.annotate_image(
                     self.image_path,
@@ -501,9 +541,11 @@ class CurationPipelineTests(unittest.TestCase):
                     ["casual"],
                 )
 
-        payload = post.call_args.kwargs["json"]
+        self.assertEqual(post.call_count, 2)
+        payload = payloads[0]
         self.assertEqual(payload["response_format"], {"type": "json_object"})
-        self.assertEqual(payload["max_tokens"], 512)
+        self.assertEqual(payload["max_tokens"], 1024)
+        self.assertEqual(payloads[1]["max_tokens"], 2048)
 
     def test_nim_json_response_is_parsed(self):
         response = SimpleNamespace(
@@ -540,6 +582,173 @@ class CurationPipelineTests(unittest.TestCase):
         self.assertTrue(result["apta"])
         self.assertEqual(result["descripcion"], "Camisa azul.")
         self.assertEqual(post.call_args.kwargs["json"]["response_format"]["type"], "json_object")
+
+    def test_nim_prompt_and_result_limit_description_and_attributes(self):
+        response = SimpleNamespace(
+            status_code=200,
+            raise_for_status=lambda: None,
+            json=lambda: {
+                "choices": [{
+                    "message": {
+                        "content": json.dumps({
+                            "apta": True,
+                            "motivo_descarte": "",
+                            "descripcion": "Camisa de algodón azul lisa para uso diario casual.",
+                            "colores": ["verde", "azul", "rojo"],
+                            "estilos": ["formal", "casual", "deportivo"],
+                        })
+                    },
+                    "finish_reason": "stop",
+                }]
+            },
+        )
+        with patch.object(app, "wait_for_nim_request_slot"), patch.object(
+            app.requests, "post", return_value=response
+        ) as post:
+            result = app.annotate_image(
+                self.image_path,
+                "camisa",
+                "nim",
+                "test-secret",
+                "https://test.invalid/v1",
+                "meta/llama-3.2-11b-vision-instruct",
+                ["azul", "rojo", "verde"],
+                ["casual", "deportivo", "formal"],
+            )
+
+        prompt = post.call_args.kwargs["json"]["messages"][0]["content"][0]["text"]
+        self.assertIn("máximo 8 palabras", prompt)
+        self.assertIn("colores (lista de máximo 2)", prompt)
+        self.assertIn("estilos (lista de máximo 2)", prompt)
+        self.assertEqual(len(result["descripcion"].split()), 8)
+        self.assertEqual(result["colores"], ["azul", "rojo"])
+        self.assertEqual(result["estilos"], ["casual", "deportivo"])
+
+    def test_nim_discard_reason_is_limited_to_eight_words(self):
+        response = SimpleNamespace(
+            status_code=200,
+            raise_for_status=lambda: None,
+            json=lambda: {
+                "choices": [{
+                    "message": {
+                        "content": json.dumps({
+                            "apta": False,
+                            "motivo_descarte": (
+                                "Esta imagen no parece corresponder a camisa debido "
+                                "a la forma y el contexto."
+                            ),
+                        })
+                    },
+                    "finish_reason": "stop",
+                }]
+            },
+        )
+        with patch.object(app, "wait_for_nim_request_slot"), patch.object(
+            app.requests, "post", return_value=response
+        ):
+            result = app.annotate_image(
+                self.image_path,
+                "camisa",
+                "nim",
+                "test-secret",
+                "https://test.invalid/v1",
+                "meta/llama-3.2-11b-vision-instruct",
+                ["azul"],
+                ["casual"],
+            )
+
+        self.assertEqual(len(result["motivo_descarte"].split()), 8)
+
+    def test_deepseek_disables_thinking_and_requests_json_mode(self):
+        response = SimpleNamespace(
+            status_code=200,
+            raise_for_status=lambda: None,
+            json=lambda: {
+                "choices": [{
+                    "message": {
+                        "content": json.dumps({
+                            "apta": True,
+                            "motivo_descarte": "",
+                            "descripcion": "Camisa azul.",
+                            "colores": ["azul", "negro", "blanco"],
+                            "estilos": ["casual", "formal", "deportivo"],
+                        })
+                    },
+                    "finish_reason": "stop",
+                }]
+            },
+        )
+        with patch.object(app.requests, "post", return_value=response) as post:
+            result = app.annotate_image(
+                self.image_path,
+                "camisa",
+                "deepseek",
+                "test-secret",
+                "https://test.invalid/v1",
+                "deepseek-flash",
+                ["azul", "negro", "blanco"],
+                ["casual", "formal", "deportivo"],
+            )
+        self.assertTrue(result["apta"])
+        self.assertEqual(result["colores"], ["azul", "blanco", "negro"])
+        self.assertEqual(result["estilos"], ["casual", "deportivo", "formal"])
+        payload = post.call_args.kwargs["json"]
+        self.assertEqual(payload["response_format"], {"type": "json_object"})
+        self.assertEqual(payload["thinking"], {"type": "disabled"})
+        self.assertEqual(payload["max_tokens"], 1024)
+        self.assertIn("Ejemplo de forma", payload["messages"][0]["content"][0]["text"])
+        self.assertIn("máximo 12 palabras", payload["messages"][0]["content"][0]["text"])
+        self.assertIn("colores (lista de máximo 3)", payload["messages"][0]["content"][0]["text"])
+
+    def test_deepseek_empty_json_output_is_retried_once(self):
+        valid_content = json.dumps({
+            "apta": True,
+            "motivo_descarte": "",
+            "descripcion": "Camisa azul.",
+            "colores": ["azul"],
+            "estilos": ["casual"],
+        })
+        responses = [
+            SimpleNamespace(
+                status_code=200,
+                raise_for_status=lambda: None,
+                json=lambda: {"choices": [{
+                    "message": {"content": ""},
+                    "finish_reason": "length",
+                }]},
+            ),
+            SimpleNamespace(
+                status_code=200,
+                raise_for_status=lambda: None,
+                json=lambda: {"choices": [{
+                    "message": {"content": valid_content},
+                    "finish_reason": "stop",
+                }]},
+            ),
+        ]
+        payloads = []
+
+        def post_response(*args, **kwargs):
+            payloads.append(copy.deepcopy(kwargs["json"]))
+            return responses.pop(0)
+
+        with patch.object(app.requests, "post", side_effect=post_response) as post:
+            result = app.annotate_image(
+                self.image_path,
+                "camisa",
+                "deepseek",
+                "test-secret",
+                "https://test.invalid/v1",
+                "deepseek-flash",
+                ["azul"],
+                ["casual"],
+            )
+        self.assertTrue(result["apta"])
+        self.assertEqual(post.call_count, 2)
+        self.assertEqual(
+            [payload["max_tokens"] for payload in payloads],
+            [1024, 2048],
+        )
 
     def test_nim_request_spacing_is_at_least_three_seconds(self):
         with (

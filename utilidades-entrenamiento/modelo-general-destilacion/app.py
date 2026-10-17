@@ -31,7 +31,7 @@ NIM_TIMEOUT_RETRY_MAX_SECONDS = 120
 _nim_request_lock = threading.Lock()
 _last_nim_request_at: float | None = None
 CANCEL_REQUESTED = threading.Event()
-ANALYSIS_PROMPT_VERSION = "1"
+ANALYSIS_PROMPT_VERSION = "3"
 DEFAULT_PROMPT_INSTRUCTIONS = (
     "Determina si la imagen muestra claramente una sola prenda de la clase indicada. "
     "Si no corresponde a la clase, está corrupta, es ilegible, contiene principalmente "
@@ -288,7 +288,7 @@ def ensure_database(database: Path) -> None:
     database.parent.mkdir(parents=True, exist_ok=True)
     try:
         sql = schema.read_text(encoding="utf-8")
-        with sqlite3.connect(database) as connection:
+        with sqlite3.connect(database, timeout=30) as connection:
             connection.execute("PRAGMA foreign_keys = ON")
             connection.executescript(sql)
             columns = {
@@ -367,7 +367,20 @@ def get_setting(connection: sqlite3.Connection, key: str, default: str) -> str:
     return default if row is None else row[0]
 
 
-def build_prompt(instructions: str, known_type: str, colors: list[str], styles: list[str]) -> str:
+def build_prompt(
+    instructions: str,
+    known_type: str,
+    colors: list[str],
+    styles: list[str],
+    max_description_words: int = 12,
+    max_attribute_values: int = 3,
+    max_reason_words: int | None = None,
+) -> str:
+    reason_instruction = (
+        f"Si apta es false, el motivo_descarte debe tener máximo {max_reason_words} palabras. "
+        if max_reason_words is not None
+        else ""
+    )
     return (
         "Contexto estructurado en TOON:\n"
         f"tarea: {json.dumps('validar_y_describir_prenda', ensure_ascii=False)}\n"
@@ -377,13 +390,40 @@ def build_prompt(instructions: str, known_type: str, colors: list[str], styles: 
         f"estilos[{len(styles)}]: {', '.join(json.dumps(value, ensure_ascii=False) for value in styles)}\n\n"
         "Instrucciones:\n"
         f"{instructions.strip()}\n\n"
-        "Devuelve únicamente un objeto JSON completo, sin Markdown ni texto adicional, "
-        "con estas claves: apta (booleano), motivo_descarte (texto), descripcion "
-        "(texto de una sola frase breve), colores (lista) y estilos (lista). Mantén "
+        "Devuelve únicamente un objeto JSON completo, sin Markdown ni texto adicional. "
+        "Ejemplo de forma (sustituye los valores por observaciones reales y valores de los "
+        "vocabularios): "
+        '{"apta":true,"motivo_descarte":"","descripcion":"Camisa azul lisa.",'
+        '"colores":["azul"],"estilos":["casual"]}. '
+        "Usa estas claves: apta (booleano), motivo_descarte (texto), descripcion "
+        f"(una frase de máximo {max_description_words} palabras), colores "
+        f"(lista de máximo {max_attribute_values}) y estilos "
+        f"(lista de máximo {max_attribute_values}). "
+        f"{reason_instruction}Mantén "
         "motivo_descarte como cadena vacía cuando la imagen sea apta; nunca uses null. "
-        "Mantén la respuesta concisa. Colores y estilos solo pueden usar los valores de los "
+        "Mantén la respuesta muy concisa. Colores y estilos solo pueden usar los valores de los "
         "vocabularios TOON. Si apta es false, incluye un motivo breve."
     )
+
+
+def build_annotation_prompt(
+    instructions: str,
+    known_type: str,
+    colors: list[str],
+    styles: list[str],
+    provider: str,
+) -> str:
+    if provider == "nim":
+        return build_prompt(
+            instructions,
+            known_type,
+            colors,
+            styles,
+            max_description_words=8,
+            max_attribute_values=2,
+            max_reason_words=8,
+        )
+    return build_prompt(instructions, known_type, colors, styles)
 
 
 def save_analysis(
@@ -450,11 +490,13 @@ def annotate_image(
     styles: list[str],
     instructions: str = DEFAULT_PROMPT_INSTRUCTIONS,
 ) -> dict:
-    prompt = build_prompt(instructions, known_type, colors, styles)
+    prompt = build_annotation_prompt(
+        instructions, known_type, colors, styles, provider
+    )
     payload = {
         "model": model,
         "temperature": 0,
-        "max_tokens": 512,
+        "max_tokens": 1024,
         "messages": [{
             "role": "user",
             "content": [
@@ -463,51 +505,85 @@ def annotate_image(
             ],
         }],
     }
-    if provider == "nim":
+    if provider in {"nim", "deepseek"}:
         payload["response_format"] = {"type": "json_object"}
-        wait_for_nim_request_slot()
-    if CANCEL_REQUESTED.is_set():
-        raise ProcessingCancelled("Detención solicitada antes de enviar la imagen.")
-    try:
-        response = requests.post(
-            f"{base_url}/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}"},
-            json=payload,
-            timeout=(15, 120),
-        )
-        response.raise_for_status()
-        body = response.json()
-        choice = body["choices"][0]
-        content = choice["message"]["content"]
-        finish_reason = choice.get("finish_reason")
-    except requests.HTTPError as error:
-        status = response.status_code
-        detail = response.text[:500].replace(api_key, "[REDACTED]")
-        raise RuntimeError(
-            f"El proveedor {provider} respondió HTTP {status} para el modelo {model}. "
-            f"Detalle: {detail or 'sin detalle'}"
-        ) from error
-    except requests.Timeout as error:
-        raise AnnotationTimeoutError(
-            f"Timeout al solicitar anotación al proveedor {provider}: {error}"
-        ) from error
-    except requests.RequestException as error:
-        raise RuntimeError(
-            f"Falló la solicitud de anotación al proveedor {provider}: {error}"
-        ) from error
-    except (ValueError, KeyError, IndexError, TypeError) as error:
-        raise RuntimeError(f"Respuesta inesperada del proveedor {provider}: {error}") from error
+    if provider == "deepseek":
+        payload["thinking"] = {"type": "disabled"}
+    result = None
+    for attempt in range(2):
+        if provider == "nim":
+            wait_for_nim_request_slot()
+        if CANCEL_REQUESTED.is_set():
+            raise ProcessingCancelled("Detención solicitada antes de enviar la imagen.")
+        try:
+            response = requests.post(
+                f"{base_url}/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json=payload,
+                timeout=(15, 120),
+            )
+            response.raise_for_status()
+            body = response.json()
+            choice = body["choices"][0]
+            content = choice["message"]["content"]
+            finish_reason = choice.get("finish_reason")
+        except requests.HTTPError as error:
+            status = response.status_code
+            detail = response.text[:500].replace(api_key, "[REDACTED]")
+            raise RuntimeError(
+                f"El proveedor {provider} respondió HTTP {status} para el modelo {model}. "
+                f"Detalle: {detail or 'sin detalle'}"
+            ) from error
+        except requests.Timeout as error:
+            raise AnnotationTimeoutError(
+                f"Timeout al solicitar anotación al proveedor {provider}: {error}"
+            ) from error
+        except requests.RequestException as error:
+            raise RuntimeError(
+                f"Falló la solicitud de anotación al proveedor {provider}: {error}"
+            ) from error
+        except (ValueError, KeyError, IndexError, TypeError) as error:
+            raise RuntimeError(f"Respuesta inesperada del proveedor {provider}: {error}") from error
 
-    if not isinstance(content, str):
-        raise ValueError("El proveedor debe responder texto JSON en choices[0].message.content.")
-    try:
-        result = parse_model_json(content)
-    except ValueError as error:
-        raise ValueError(
-            f"El proveedor devolvió JSON inválido "
-            f"(finish_reason={finish_reason or 'desconocido'}, "
-            f"caracteres={len(content)}): {error}"
-        ) from error
+        if not isinstance(content, str):
+            raise ValueError("El proveedor debe responder texto JSON en choices[0].message.content.")
+        try:
+            result = parse_model_json(content)
+            break
+        except ValueError as error:
+            incomplete = finish_reason == "length" or not content.strip()
+            if attempt == 0 and incomplete:
+                if CANCEL_REQUESTED.is_set():
+                    raise ProcessingCancelled(
+                        "Detención solicitada; no se reintentará la respuesta incompleta."
+                    ) from error
+                payload["max_tokens"] = 2048
+                payload["messages"][0]["content"][0]["text"] += (
+                    "\nResponde inmediatamente con el objeto JSON completo del ejemplo; "
+                    "omite cualquier razonamiento, explicación o detalle adicional."
+                )
+                print(
+                    f"Respuesta incompleta de {provider} (finish_reason="
+                    f"{finish_reason or 'desconocido'}, caracteres={len(content)}); "
+                    "se reintentará una vez con JSON conciso."
+                )
+                continue
+            if finish_reason == "length":
+                raise ValueError(
+                    f"Respuesta truncada por límite de tokens (finish_reason=length, "
+                    f"caracteres={len(content)}, max_tokens={payload['max_tokens']}); "
+                    "se agotó un reintento y no se guardó el análisis."
+                ) from error
+            if not content.strip():
+                raise ValueError(
+                    f"El proveedor {provider} devolvió contenido vacío; se agotó un "
+                    "reintento y no se guardó el análisis."
+                ) from error
+            raise ValueError(
+                f"El proveedor devolvió JSON inválido "
+                f"(finish_reason={finish_reason or 'desconocido'}, "
+                f"caracteres={len(content)}): {error}"
+            ) from error
     suitable = result.get("apta")
     if not isinstance(suitable, bool):
         raise ValueError("El proveedor debe indicar apta como booleano.")
@@ -519,7 +595,11 @@ def annotate_image(
     if not suitable:
         return {
             "apta": False,
-            "motivo_descarte": reason.strip()[:500] or "La IA descartó la imagen.",
+            "motivo_descarte": (
+                " ".join(reason.strip().split()[:8])
+                if provider == "nim"
+                else reason.strip()[:500]
+            ) or "La IA descartó la imagen.",
         }
     description = result.get("descripcion")
     if not isinstance(description, str) or not description.strip():
@@ -529,10 +609,14 @@ def annotate_image(
         if not isinstance(values, list) or any(value not in vocabulary for value in values):
             raise ValueError(f"El campo {field} contiene valores fuera del catálogo.")
         result[field] = sorted(set(values))
+        if provider == "nim":
+            result[field] = result[field][:2]
     return {
         "apta": True,
         "motivo_descarte": "",
-        "descripcion": description.strip()[:1200],
+        "descripcion": " ".join(description.split()[:8])
+        if provider == "nim"
+        else description.strip()[:1200],
         "colores": result["colores"],
         "estilos": result["estilos"],
     }
@@ -554,10 +638,12 @@ def import_one(
     model: str,
     created_files: list[Path],
 ) -> bool:
+    connection.execute("BEGIN IMMEDIATE")
     exists = connection.execute(
         "SELECT 1 FROM prenda_imagen WHERE sha256 = ? LIMIT 1", (item["digest"],)
     ).fetchone()
     if exists:
+        connection.rollback()
         return False
 
     code = f"{source_id}-{item['digest'][:16]}"
@@ -632,7 +718,7 @@ def filter_duplicate_plans(
 ) -> tuple[list[tuple[str, dict, dict]], int]:
     imported_hashes = set()
     if database.is_file():
-        with sqlite3.connect(database) as connection:
+        with sqlite3.connect(database, timeout=30) as connection:
             imported_hashes = {
                 row[0]
                 for row in connection.execute(
@@ -726,7 +812,7 @@ def command_ingest(args: argparse.Namespace, selected: dict) -> int:
     invalid_annotations = 0
     timed_out_images = 0
     stopped = False
-    with sqlite3.connect(database) as connection:
+    with sqlite3.connect(database, timeout=30) as connection:
         connection.execute("PRAGMA foreign_keys = ON")
         colors = get_catalog(connection, "color")
         styles = get_catalog(connection, "estilo")
@@ -754,7 +840,13 @@ def command_ingest(args: argparse.Namespace, selected: dict) -> int:
                     item["category"],
                     args.provider,
                     model,
-                    build_prompt(prompt_instructions, item["category"], colors, styles),
+                    build_annotation_prompt(
+                        prompt_instructions,
+                        item["category"],
+                        colors,
+                        styles,
+                        args.provider,
+                    ),
                 )
                 annotation = get_cached_analysis(connection, fingerprint)
                 if annotation is not None:

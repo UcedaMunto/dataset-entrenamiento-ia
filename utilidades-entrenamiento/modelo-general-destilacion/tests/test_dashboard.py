@@ -20,7 +20,7 @@ class DashboardTests(unittest.TestCase):
         self.env.write_text(
             "ANNOTATION_PROVIDER=nim\n"
             "NVIDIA_NIM_API_KEY=do-not-return-this-secret\n"
-            "DEEPSEEK_API_KEY=\n"
+            "DEEPSEEK_API_KEY=deepseek-test-secret\n"
             "OPENAI_API_KEY=\n",
             encoding="utf-8",
         )
@@ -149,19 +149,20 @@ class DashboardTests(unittest.TestCase):
         })
         self.assertEqual((source_id, provider, limit), ("clothing-full", "none", 1))
 
-    def test_start_ingest_launches_bounded_command_without_secret_arguments(self):
-        state = {
-            "status": "idle",
-            "source": None,
-            "provider": None,
-            "limit": None,
-            "started_at": None,
-            "finished_at": None,
-            "exit_code": None,
-            "cancellation_requested": False,
-            "message": "",
-            "logs": [],
+    def test_ingest_accepts_5000_and_rejects_more(self):
+        payload = {
+            "source": "clothing-full",
+            "provider": "none",
+            "limit": 5000,
+            "confirm_write": True,
         }
+        self.assertEqual(dashboard.validate_ingest_request(payload)[2], 5000)
+        with self.assertRaisesRegex(ValueError, "1 y 5000"):
+            dashboard.validate_ingest_request({**payload, "limit": 5001})
+
+    def test_start_ingest_launches_bounded_command_without_secret_arguments(self):
+        states = {}
+        processes = {}
         worker = unittest.mock.Mock()
         request = {
             "source": "clothing-full",
@@ -170,50 +171,81 @@ class DashboardTests(unittest.TestCase):
             "confirm_write": True,
             "confirm_remote": True,
         }
-        with patch.object(dashboard, "JOB_STATE", state), patch.object(
+        with patch.object(dashboard, "JOB_STATES", states), patch.object(
+            dashboard, "JOB_PROCESSES", processes
+        ), patch.object(
             dashboard.threading, "Thread", return_value=worker
         ) as thread_factory:
             result = dashboard.start_ingest(request)
 
-        command, environment, secrets = thread_factory.call_args.kwargs["args"]
+        provider, command, environment, secrets = thread_factory.call_args.kwargs["args"]
+        self.assertEqual(provider, "nim")
         self.assertIn("--allow-remote", command)
         self.assertIn("--limit", command)
         self.assertIn("3", command)
         self.assertNotIn("do-not-return-this-secret", command)
         self.assertEqual(environment["NVIDIA_NIM_API_KEY"], "do-not-return-this-secret")
         self.assertIn("do-not-return-this-secret", secrets)
-        self.assertEqual(result["status"], "running")
+        self.assertEqual(result["jobs"][0]["status"], "running")
         worker.start.assert_called_once()
 
+    def test_start_ingest_launches_nim_and_deepseek_in_parallel(self):
+        states = {}
+        workers = [unittest.mock.Mock(), unittest.mock.Mock()]
+        request = {
+            "source": "clothing-full",
+            "providers": ["nim", "deepseek"],
+            "limit": 5000,
+            "confirm_write": True,
+            "confirm_remote": True,
+        }
+        with patch.object(dashboard, "JOB_STATES", states), patch.object(
+            dashboard, "JOB_PROCESSES", {}
+        ), patch.object(
+            dashboard.threading, "Thread", side_effect=workers
+        ) as thread_factory:
+            result = dashboard.start_ingest(request)
+
+        self.assertEqual([job["provider"] for job in result["jobs"]], ["nim", "deepseek"])
+        self.assertTrue(all(job["status"] == "running" for job in result["jobs"]))
+        self.assertEqual(thread_factory.call_count, 2)
+        self.assertEqual(
+            [worker.start.call_count for worker in workers],
+            [1, 1],
+        )
+        launched = [call.kwargs["args"] for call in thread_factory.call_args_list]
+        self.assertEqual([args[0] for args in launched], ["nim", "deepseek"])
+        self.assertTrue(all("--limit" in args[1] and "5000" in args[1] for args in launched))
+
     def test_stop_ingest_sends_cooperative_signal_to_running_process(self):
-        state = {
+        state = {"nim": {
             "status": "running",
             "cancellation_requested": False,
             "message": "",
             "logs": [],
-        }
+        }}
         process = unittest.mock.Mock()
         process.pid = 42
-        with patch.object(dashboard, "JOB_STATE", state), patch.object(
-            dashboard, "JOB_PROCESS", process
+        with patch.object(dashboard, "JOB_STATES", state), patch.object(
+            dashboard, "JOB_PROCESSES", {"nim": process}
         ):
-            result = dashboard.stop_ingest()
+            result = dashboard.stop_ingest("nim")
 
         process.send_signal.assert_called_once_with(dashboard.signal.SIGTERM)
         self.assertTrue(result["cancellation_requested"])
         self.assertIn("Detención solicitada", result["message"])
 
     def test_stop_ingest_is_remembered_if_child_is_not_started_yet(self):
-        state = {
+        state = {"nim": {
             "status": "running",
             "cancellation_requested": False,
             "message": "",
             "logs": [],
-        }
-        with patch.object(dashboard, "JOB_STATE", state), patch.object(
-            dashboard, "JOB_PROCESS", None
+        }}
+        with patch.object(dashboard, "JOB_STATES", state), patch.object(
+            dashboard, "JOB_PROCESSES", {}
         ):
-            result = dashboard.stop_ingest()
+            result = dashboard.stop_ingest("nim")
         self.assertTrue(result["cancellation_requested"])
 
     def test_stop_endpoint_calls_cooperative_stop(self):
@@ -222,21 +254,25 @@ class DashboardTests(unittest.TestCase):
         handler.headers["Host"] = "127.0.0.1:8787"
         handler.headers["Origin"] = "http://127.0.0.1:8787"
         handler.headers["Content-Type"] = "application/json"
-        handler.headers["Content-Length"] = "2"
-        handler.rfile = BytesIO(b"{}")
+        body = json.dumps({"provider": "nim"}).encode()
+        handler.headers["Content-Length"] = str(len(body))
+        handler.rfile = BytesIO(body)
         handler.path = "/api/stop"
         handler._send_json = unittest.mock.Mock()
-        with patch.object(dashboard, "stop_ingest", return_value={"status": "running"}):
+        with patch.object(dashboard, "stop_ingest", return_value={"status": "running"}) as stop:
             dashboard.DashboardHandler.do_POST(handler)
+        stop.assert_called_once_with("nim")
         handler._send_json.assert_called_once_with(202, {"status": "running"})
 
     def test_job_logs_redact_provider_keys(self):
-        state = {"logs": []}
-        with patch.object(dashboard, "JOB_STATE", state):
+        states = {"nim": {"logs": []}}
+        with patch.object(dashboard, "JOB_STATES", states):
             dashboard._append_job_log(
-                "provider error: do-not-return-this-secret", ["do-not-return-this-secret"]
+                "nim",
+                "provider error: do-not-return-this-secret",
+                ["do-not-return-this-secret"]
             )
-        self.assertEqual(state["logs"], ["provider error: [REDACTED]"])
+        self.assertEqual(states["nim"]["logs"], ["provider error: [REDACTED]"])
 
 
 if __name__ == "__main__":
