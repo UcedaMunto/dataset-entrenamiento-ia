@@ -14,6 +14,9 @@ docker compose run --rm --no-deps --entrypoint python curator -m unittest discov
 Cobertura:
 
 - La huella del análisis es determinista y separa proveedor, modelo, clase e imagen.
+- `camisa` y `camiseta` se normalizan al mismo tipo canónico `camisa` durante el escaneo/importación.
+- Si un modelo NVIDIA NIM falla, se prueba automáticamente el siguiente modelo de `NVIDIA_NIM_FALLBACK_MODELS`; los siguientes elementos del lote continúan con el modelo que funcionó.
+- Si DeepSeek falla por HTTP/red, timeout o respuesta inválida, se intenta el análisis con NVIDIA NIM y el resultado queda atribuido al proveedor/modelo que respondió.
 - Un análisis aceptado guardado se reutiliza; no se vuelve a invocar al modelo.
 - Un descarte guardado también se reutiliza; no se vuelve a enviar ni importar.
 - Una anotación nueva queda registrada y la siguiente ejecución omite la imagen ya importada.
@@ -65,6 +68,8 @@ El curador aplica una separación mínima de 3 segundos entre inicios de peticio
 
 - Con key/endpoint inválidos, la ejecución debe exponer el error; no marcar una respuesta fallida como procesada.
 - Si la llamada API funciona pero falla la escritura de una imagen aceptada, el resultado del análisis permanece cacheado para reintentar la importación sin volver a pagar la inferencia.
+- Simular HTTP 500 o respuesta inválida en el modelo NIM principal; verificar el intento del modelo siguiente y que se registra el proveedor/modelo de respaldo.
+- Simular fallo DeepSeek con clave NIM configurada; verificar el fallback a NIM y que la fila de análisis y la descripción atribuyen el resultado a NIM.
 - Una respuesta inválida no genera análisis cacheado; la imagen se omite y el proceso prueba las siguientes del lote.
 - DeepSeek solicita `response_format=json_object`, 1.024 tokens iniciales y un reintento con 2.048 cuando el contenido está vacío o truncado; además envía `thinking: {type: disabled}` y el prompt incluye JSON y un ejemplo.
 - NIM envía cuatro solicitudes por imagen, en orden: colores, estilos, temporadas y validación/descripción. Cada etapa solicita JSON de hasta 256 tokens y reintenta una vez con 512 ante JSON inválido; comprobar que se combinan las cuatro respuestas, los inicios se separan al menos 3 segundos y una detención impide enviar las etapas siguientes.

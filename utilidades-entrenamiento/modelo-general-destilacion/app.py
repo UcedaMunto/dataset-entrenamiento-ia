@@ -997,7 +997,7 @@ def annotate_with_provider_fallback(
     seasons: list[str],
     nim_settings: tuple[str, str, str] | None = None,
     unavailable_nim_models: set[str] | None = None,
-) -> tuple[dict, str, str, int]:
+) -> tuple[dict | None, str, str, int]:
     unavailable_nim_models = unavailable_nim_models if unavailable_nim_models is not None else set()
     candidates = [(provider, api_key, base_url, model)]
     if provider == "nim":
@@ -1015,6 +1015,7 @@ def annotate_with_provider_fallback(
         )
 
     exhausted_timeouts = 0
+    failed_nim_models: set[str] = set()
     last_error: RuntimeError | ValueError | None = None
     for candidate_index, (candidate_provider, candidate_key, candidate_url, candidate_model) in enumerate(candidates):
         attempts = 2 if candidate_provider == "nim" else 1
@@ -1035,6 +1036,7 @@ def annotate_with_provider_fallback(
                     seasons=seasons,
                 )
                 if candidate_index:
+                    unavailable_nim_models.update(failed_nim_models)
                     print(
                         f"Fallback completado: {candidate_provider}/{candidate_model} "
                         f"para {path.name}."
@@ -1070,7 +1072,7 @@ def annotate_with_provider_fallback(
                 break
 
         if candidate_provider == "nim":
-            unavailable_nim_models.add(candidate_model)
+            failed_nim_models.add(candidate_model)
         if candidate_index + 1 < len(candidates):
             next_provider, _, _, next_model = candidates[candidate_index + 1]
             print(
@@ -1082,6 +1084,12 @@ def annotate_with_provider_fallback(
         raise RuntimeError("No se pudo iniciar la anotación con ningún proveedor.")
     if provider == "deepseek" and nim_settings is None:
         print("No se pudo usar el fallback NVIDIA NIM: falta NVIDIA_NIM_API_KEY.")
+    if isinstance(last_error, AnnotationTimeoutError) and exhausted_timeouts:
+        print(
+            f"Timeout agotado para todos los modelos NIM disponibles; "
+            f"se omite {path.name} sin guardar análisis."
+        )
+        return None, provider, model, exhausted_timeouts
     raise last_error
 
 
@@ -1425,6 +1433,8 @@ def command_ingest(args: argparse.Namespace, selected: dict) -> int:
                             unavailable_nim_models=unavailable_nim_models,
                         )
                         timed_out_images += exhausted_timeouts
+                        if annotation is None:
+                            continue
                     except ProcessingCancelled:
                         stopped = True
                         print("Detención solicitada; no se enviarán más imágenes.")

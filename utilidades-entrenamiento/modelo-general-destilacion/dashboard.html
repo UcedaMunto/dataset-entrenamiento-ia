@@ -77,14 +77,14 @@
         </div>
         <div class="job-checks">
           <strong>Proveedores (puedes ejecutar NIM y DeepSeek en paralelo)</strong>
-          <label><input id="providerNim" type="checkbox" checked><span>NVIDIA NIM (si descarta una imagen, se consulta también a DeepSeek cuando esté configurado).</span></label>
+          <label><input id="providerNim" type="checkbox" checked><span>NVIDIA NIM (cambia automáticamente a otro modelo NIM si falla; si descarta una imagen, también consulta DeepSeek cuando esté configurado).</span></label>
           <label><input id="providerDeepseek" type="checkbox"><span>DeepSeek</span></label>
           <label><input id="providerNone" type="checkbox"><span>Sin IA (solo importación local; no combinar con APIs)</span></label>
           <label><input id="confirmWrite" type="checkbox" checked required><span>Confirmo que el lote puede copiar imágenes al dataset y escribir en SQLite.</span></label>
-          <label id="remoteConsentRow" hidden><input id="confirmRemote" type="checkbox" checked><span>Autorizo enviar imágenes a los proveedores seleccionados y, si elijo NVIDIA NIM, también a DeepSeek cuando NIM descarte una imagen y DeepSeek esté configurado. Esto puede aumentar el consumo/costo y utilizar imágenes de cada proveedor para el segundo análisis.</span></label>
+          <label id="remoteConsentRow" hidden><input id="confirmRemote" type="checkbox" checked><span>Autorizo enviar imágenes a los proveedores seleccionados; los modelos NIM alternativos también pueden recibirlas y, si NIM descarta, puede consultarse DeepSeek. Si DeepSeek falla, puede usarse NIM cuando esté configurado. Esto puede aumentar el consumo/costo y compartir la imagen con otro proveedor.</span></label>
         </div>
         <div class="row"><button id="startIngestButton" class="primary" type="submit">▶ Iniciar ejecuciones seleccionadas</button><span id="jobMessage" role="status" class="muted">Selecciona uno o ambos proveedores.</span></div>
-        <p class="muted">El límite aplica por proveedor seleccionado: con ambos seleccionados se procesan hasta 10.000 análisis iniciales combinados. Los descartes de NIM pueden generar análisis adicionales en DeepSeek, no contabilizados en ese límite. Detener un proveedor no afecta al otro; el fallback a DeepSeek forma parte del lote NIM. La imagen que ya esté en análisis puede terminar antes de cerrar ese lote.</p>
+        <p class="muted">El límite aplica por proveedor seleccionado: con ambos seleccionados se procesan hasta 10.000 análisis iniciales combinados. Los fallbacks de modelo/proveedor pueden generar análisis adicionales fuera de ese límite. Detener un proveedor no afecta al otro; la imagen que ya esté en análisis y su fallback pueden terminar antes de cerrar ese lote.</p>
       </form>
       <div id="providerJobs" class="provider-jobs" aria-live="polite"></div>
     </section>

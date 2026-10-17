@@ -147,6 +147,10 @@ class CurationPipelineTests(unittest.TestCase):
                 "provider_settings",
                 return_value=("test-key", "https://test.invalid/v1", "test-model"),
             ),
+            patch.dict(
+                os.environ,
+                {"NVIDIA_NIM_FALLBACK_MODELS": "meta/llama-3.2-11b-vision-instruct"},
+            ),
         ):
             return app.command_ingest(args, {"fixture": self.source})
 
