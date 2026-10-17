@@ -277,6 +277,7 @@ class DashboardTests(unittest.TestCase):
         launched = [call.kwargs["args"] for call in thread_factory.call_args_list]
         self.assertEqual([args[0] for args in launched], ["nim", "deepseek"])
         self.assertTrue(all("--limit" in args[1] and "5000" in args[1] for args in launched))
+        self.assertEqual(launched[0][2]["NIM_DEEPSEEK_FALLBACK"], "0")
 
     def test_stop_ingest_sends_cooperative_signal_to_running_process(self):
         state = {"nim": {

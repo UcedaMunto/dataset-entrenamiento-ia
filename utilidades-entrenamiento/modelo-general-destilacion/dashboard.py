@@ -239,6 +239,9 @@ def start_ingest(payload: dict) -> dict:
     environment["PYTHONUNBUFFERED"] = "1"
     secrets = [env_values.get(name, "") for name in PROVIDERS.values()]
     for provider in selected_providers:
+        provider_environment = environment.copy()
+        if provider == "nim" and "deepseek" in selected_providers:
+            provider_environment["NIM_DEEPSEEK_FALLBACK"] = "0"
         command = [
             sys.executable,
             str(ROOT / "app.py"),
@@ -252,7 +255,7 @@ def start_ingest(payload: dict) -> dict:
             command.append("--allow-remote")
         worker = threading.Thread(
             target=_run_ingest,
-            args=(provider, command, environment, secrets),
+            args=(provider, command, provider_environment, secrets),
             name=f"dashboard-ingest-{provider}",
             daemon=True,
         )
@@ -457,6 +460,7 @@ def get_overview() -> dict:
 
         colors = app.get_catalog(connection, "color")
         styles = app.get_catalog(connection, "estilo")
+        seasons = app.get_catalog(connection, "temporada")
         instructions = app.get_setting(
             connection, "prompt_instructions", app.DEFAULT_PROMPT_INSTRUCTIONS
         )
@@ -473,7 +477,7 @@ def get_overview() -> dict:
             selected_provider = "none"
 
         prompt_preview = app.build_annotation_prompt(
-            instructions, "camisa", colors, styles, selected_provider
+            instructions, "camisa", colors, styles, selected_provider, seasons
         )
         estimate = estimate_completion(connection, total)
         analysis_count = connection.execute(
@@ -489,7 +493,7 @@ def get_overview() -> dict:
         "analysis_count": analysis_count,
         "prompt_instructions": instructions,
         "prompt_preview": prompt_preview,
-        "properties": {"color": colors, "estilo": styles},
+        "properties": {"color": colors, "estilo": styles, "temporada": seasons},
         "providers": providers,
         "selected_provider": selected_provider,
         "sources": [
@@ -819,7 +823,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def _save_properties(self, payload: dict) -> None:
         updates = {}
-        for code in ("color", "estilo"):
+        for code in ("color", "estilo", "temporada"):
             values = payload.get(code)
             if not isinstance(values, list) or not values or len(values) > 50:
                 raise ValueError(f"{code} debe incluir entre 1 y 50 valores.")

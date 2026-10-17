@@ -120,7 +120,7 @@ class CurationPipelineTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def run_ingest(self, provider="nim", items=None, limit=None):
+    def run_ingest(self, provider="nim", items=None, limit=None, settings=None):
         items = items or [self.item]
         args = SimpleNamespace(
             limit=limit or len(items),
@@ -137,7 +137,15 @@ class CurationPipelineTests(unittest.TestCase):
                 "unmapped": 0,
                 "oversize": 0,
             })),
-            patch.object(app, "provider_settings", return_value=("test-key", "https://test.invalid/v1", "test-model")),
+            patch.object(
+                app,
+                "provider_settings",
+                side_effect=settings,
+            ) if settings else patch.object(
+                app,
+                "provider_settings",
+                return_value=("test-key", "https://test.invalid/v1", "test-model"),
+            ),
         ):
             return app.command_ingest(args, {"fixture": self.source})
 
@@ -164,7 +172,9 @@ class CurationPipelineTests(unittest.TestCase):
         with sqlite3.connect(self.database) as connection:
             app.save_analysis(connection, fingerprint, self.item, "nim", "test-model", result)
 
-        with patch.object(app, "annotate_image", side_effect=AssertionError("cache miss")) as annotate:
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}), patch.object(
+            app, "annotate_image", side_effect=AssertionError("cache miss")
+        ) as annotate:
             self.assertEqual(self.run_ingest(), 0)
             self.assertEqual(self.run_ingest(), 0)
         annotate.assert_not_called()
@@ -185,12 +195,80 @@ class CurationPipelineTests(unittest.TestCase):
         with sqlite3.connect(self.database) as connection:
             app.save_analysis(connection, fingerprint, self.item, "nim", "test-model", result)
 
-        with patch.object(app, "annotate_image", side_effect=AssertionError("cache miss")) as annotate:
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}), patch.object(
+            app, "annotate_image", side_effect=AssertionError("cache miss")
+        ) as annotate:
             self.assertEqual(self.run_ingest(), 0)
             self.assertEqual(self.run_ingest(), 0)
         annotate.assert_not_called()
         with sqlite3.connect(self.database) as connection:
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM analisis_imagen").fetchone()[0], 1)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM prenda").fetchone()[0], 0)
+
+    def test_nim_rejection_is_rechecked_by_deepseek_and_imported_if_accepted(self):
+        nim_rejection = {
+            "apta": False,
+            "motivo_descarte": "No corresponde a camisa.",
+            "colores": ["azul"],
+            "estilos": ["casual"],
+        }
+        deepseek_acceptance = {
+            "apta": True,
+            "motivo_descarte": "",
+            "descripcion": "Camisa azul casual.",
+            "colores": ["azul"],
+            "estilos": ["casual"],
+        }
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-deepseek-key"}), patch.object(
+            app, "annotate_image", side_effect=[nim_rejection, deepseek_acceptance]
+        ) as annotate:
+            self.assertEqual(self.run_ingest(settings=[
+                ("test-nim-key", "https://nim.test/v1", "nim-model"),
+                ("test-deepseek-key", "https://deepseek.test/v1", "deepseek-model"),
+            ]), 0)
+
+        self.assertEqual(
+            [call.args[2] for call in annotate.call_args_list], ["nim", "deepseek"]
+        )
+        with sqlite3.connect(self.database) as connection:
+            analyses = connection.execute(
+                "SELECT proveedor, estado FROM analisis_imagen ORDER BY proveedor"
+            ).fetchall()
+            self.assertEqual(analyses, [("deepseek", "aceptada"), ("nim", "descartada")])
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM prenda").fetchone()[0], 1)
+            self.assertEqual(
+                connection.execute("SELECT proveedor, modelo FROM descripcion_prenda").fetchone(),
+                ("deepseek", "deepseek-model"),
+            )
+
+    def test_nim_and_deepseek_rejections_are_both_saved_without_import(self):
+        nim_rejection = {
+            "apta": False,
+            "motivo_descarte": "No corresponde a camisa.",
+            "colores": ["azul"],
+            "estilos": ["casual"],
+        }
+        deepseek_rejection = {
+            "apta": False,
+            "motivo_descarte": "No es una camisa.",
+            "colores": ["azul"],
+            "estilos": ["casual"],
+        }
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-deepseek-key"}), patch.object(
+            app, "annotate_image", side_effect=[nim_rejection, deepseek_rejection]
+        ):
+            self.assertEqual(self.run_ingest(settings=[
+                ("test-nim-key", "https://nim.test/v1", "nim-model"),
+                ("test-deepseek-key", "https://deepseek.test/v1", "deepseek-model"),
+            ]), 0)
+
+        with sqlite3.connect(self.database) as connection:
+            self.assertEqual(
+                connection.execute(
+                    "SELECT proveedor, estado FROM analisis_imagen ORDER BY proveedor"
+                ).fetchall(),
+                [("deepseek", "descartada"), ("nim", "descartada")],
+            )
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM prenda").fetchone()[0], 0)
 
     def test_new_analysis_is_saved_and_reused(self):

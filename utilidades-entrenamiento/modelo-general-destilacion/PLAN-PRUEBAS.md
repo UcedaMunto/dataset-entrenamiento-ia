@@ -66,6 +66,7 @@ El curador aplica una separación mínima de 3 segundos entre inicios de peticio
 - Una respuesta inválida no genera análisis cacheado; la imagen se omite y el proceso prueba las siguientes del lote.
 - DeepSeek solicita `response_format=json_object`, 1.024 tokens iniciales y un reintento con 2.048 cuando el contenido está vacío o truncado; además envía `thinking: {type: disabled}` y el prompt incluye JSON y un ejemplo.
 - NIM envía tres solicitudes por imagen, en orden: colores, estilos, validación/descripción. Cada etapa solicita JSON de hasta 256 tokens y reintenta una vez con 512 ante JSON inválido; comprobar que se combinan las tres respuestas, los inicios se separan al menos 3 segundos y una detención impide enviar las etapas siguientes.
+- Con DeepSeek configurado, un descarte NIM debe iniciar una evaluación DeepSeek usando su propio fingerprint/cache. Si DeepSeek acepta, importar con proveedor/modelo DeepSeek; si también descarta, conservar ambos análisis y no importar. Sin clave DeepSeek, mantener el descarte NIM y mostrarlo explícitamente. Si ambos proveedores se seleccionan en paralelo, comprobar que no se dispara una llamada fallback redundante desde el proceso NIM.
 - NIM debe pedir un máximo de 8 palabras en descripción y motivo de descarte, y máximo 2 colores y 2 estilos. Verificar que valores fuera del catálogo se ignoran, no invalidan la imagen, y los resultados combinados conservan solo dos valores válidos. DeepSeek mantiene descripción de hasta 12 palabras y hasta 3 colores/estilos.
 - Mocks de ambos proveedores: una primera respuesta vacía/truncada seguida de JSON válido debe devolver anotación válida y demostrar el aumento de tokens; dos respuestas incompletas deben omitir la imagen sin guardarla y continuar el lote.
 - Dos inicios consecutivos de solicitudes NIM se separan como mínimo 3 segundos. Ante timeout, el proceso espera un intervalo aleatorio entre 30 y 120 segundos y reintenta la misma imagen exactamente una vez; si el segundo intento también expira, la omite y pasa a la siguiente muestra. Verificar orden de imágenes, espera y que solo se persista una decisión válida.
@@ -86,6 +87,7 @@ Comprobar:
 - Los totales y conteos por clase coinciden con consultas de SQLite.
 - La sección de actividad muestra las últimas cinco prendas, propiedades, descripciones y proveedor/modelo; no hay imágenes si aún no se han importado.
 - Las pestañas muestran incorporadas y descartadas de cada proveedor. Las imágenes descartadas se resuelven por su ruta guardada o, para análisis antiguos, por el hash SHA-256 en las fuentes crudas.
+- La confirmación de envío remoto indica que NIM puede reenviar descartes a DeepSeek y que esto puede agregar costo/uso de imágenes.
 - La estimación queda como “sin datos” con menos de dos marcas de tiempo medibles y pasa a duración cuando existe una tasa válida.
 - Guardar un prompt cambia la vista previa y el valor persistido en `pipeline_config`; el prompt nuevo cambia la huella del análisis.
 - Cambiar vocabularios modifica `catalogo_propiedad`, y el prompt siguiente contiene esos valores.

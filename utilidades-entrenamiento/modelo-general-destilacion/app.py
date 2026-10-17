@@ -379,7 +379,9 @@ def build_prompt(
     max_description_words: int = 12,
     max_attribute_values: int = 3,
     max_reason_words: int | None = None,
+    seasons: list[str] | None = None,
 ) -> str:
+    seasons = seasons or []
     reason_instruction = (
         f"Si apta es false, el motivo_descarte debe tener máximo {max_reason_words} palabras. "
         if max_reason_words is not None
@@ -392,21 +394,25 @@ def build_prompt(
         f"clase_canonica: {json.dumps(known_type, ensure_ascii=False)}\n"
         f"colores[{len(colors)}]: {', '.join(json.dumps(value, ensure_ascii=False) for value in colors)}\n"
         f"estilos[{len(styles)}]: {', '.join(json.dumps(value, ensure_ascii=False) for value in styles)}\n\n"
+        f"temporadas[{len(seasons)}]: "
+        f"{', '.join(json.dumps(value, ensure_ascii=False) for value in seasons)}\n\n"
         "Instrucciones:\n"
         f"{instructions.strip()}\n\n"
         "Devuelve únicamente un objeto JSON completo, sin Markdown ni texto adicional. "
         "Ejemplo de forma (sustituye los valores por observaciones reales y valores de los "
         "vocabularios): "
         '{"apta":true,"motivo_descarte":"","descripcion":"Camisa azul lisa.",'
-        '"colores":["azul"],"estilos":["casual"]}. '
+        '"colores":["azul"],"estilos":["casual"],"temporadas":["invierno"]}. '
         "Usa estas claves: apta (booleano), motivo_descarte (texto), descripcion "
         f"(una frase de máximo {max_description_words} palabras), colores "
         f"(lista de máximo {max_attribute_values}) y estilos "
-        f"(lista de máximo {max_attribute_values}). "
+        f"(lista de máximo {max_attribute_values}; puede incluir nuevos valores observables), "
+        "temporadas (lista de máximo 2; puede incluir nuevos valores con evidencia visual). "
         f"{reason_instruction}Mantén "
         "motivo_descarte como cadena vacía cuando la imagen sea apta; nunca uses null. "
-        "Mantén la respuesta muy concisa. Colores y estilos solo pueden usar los valores de los "
-        "vocabularios TOON. Si apta es false, incluye un motivo breve."
+        "Mantén la respuesta muy concisa. Los colores solo pueden usar valores del catálogo. "
+        "Estilos y temporadas pueden ser opciones nuevas, concretas y observables; se agregarán "
+        "al catálogo. Si apta es false, incluye un motivo breve."
     )
 
 
@@ -416,12 +422,15 @@ def build_annotation_prompt(
     colors: list[str],
     styles: list[str],
     provider: str,
+    seasons: list[str] | None = None,
 ) -> str:
     if provider == "nim":
         return "\n\n--- SIGUIENTE ETAPA ---\n\n".join(
-            build_nim_stage_prompts(instructions, known_type, colors, styles)
+            build_nim_stage_prompts(instructions, known_type, colors, styles, seasons or [])
         )
-    return build_prompt(instructions, known_type, colors, styles)
+    return build_prompt(
+        instructions, known_type, colors, styles, seasons=seasons
+    )
 
 
 def build_nim_stage_prompts(
@@ -429,16 +438,19 @@ def build_nim_stage_prompts(
     known_type: str,
     colors: list[str],
     styles: list[str],
+    seasons: list[str] | None = None,
 ) -> list[str]:
+    seasons = seasons or []
     color_values = ", ".join(json.dumps(value, ensure_ascii=False) for value in colors)
     style_values = ", ".join(json.dumps(value, ensure_ascii=False) for value in styles)
+    season_values = ", ".join(json.dumps(value, ensure_ascii=False) for value in seasons)
     context = (
         f"Clase de prenda: {known_type}. "
         "Analiza solo la prenda visible en la imagen."
     )
     return [
         (
-            "ETAPA 1/3 — COLORES\n"
+            "ETAPA 1/4 — COLORES\n"
             f"{context}\n"
             f"Colores permitidos: [{color_values}].\n"
             "Devuelve solo un objeto JSON con la clave colores y una lista de cero, uno "
@@ -446,15 +458,26 @@ def build_nim_stage_prompts(
             "No incluyas estilo, descripción, explicación ni otras claves."
         ),
         (
-            "ETAPA 2/3 — ESTILOS\n"
+            "ETAPA 2/4 — ESTILOS\n"
             f"{context}\n"
             f"Estilos permitidos: [{style_values}].\n"
             "Devuelve solo un objeto JSON con la clave estilos y una lista de cero, uno "
-            'o dos valores exactos del catálogo, por ejemplo {"estilos":["casual"]}. '
-            "No incluyas colores, descripción, explicación ni otras claves."
+            'o dos estilos, por ejemplo {"estilos":["casual"]}. '
+            "Puedes proponer estilos nuevos, concretos y observables. "
+            "No incluyas colores, temporadas, descripción ni otras claves."
         ),
         (
-            "ETAPA 3/3 — VALIDACIÓN Y DESCRIPCIÓN\n"
+            "ETAPA 3/4 — TEMPORADAS\n"
+            f"{context}\n"
+            f"Opciones conocidas: [{season_values}].\n"
+            "Devuelve solo un objeto JSON con la clave temporadas y una lista de cero, "
+            'uno o dos opciones, por ejemplo {"temporadas":["invierno"]}. '
+            "Puedes proponer opciones nuevas solo cuando exista evidencia visual; "
+            "si no se infiere una temporada, devuelve una lista vacía. "
+            "No incluyas colores, estilos, descripción ni otras claves."
+        ),
+        (
+            "ETAPA 4/4 — VALIDACIÓN Y DESCRIPCIÓN\n"
             f"{context}\n"
             "Instrucciones editables:\n"
             f"{instructions.strip()}\n\n"
@@ -462,7 +485,7 @@ def build_nim_stage_prompts(
             "(booleano), motivo_descarte (texto de máximo 8 palabras) y descripcion "
             "(texto de máximo 8 palabras; cadena vacía si apta es false). "
             'Ejemplo: {"apta":true,"motivo_descarte":"","descripcion":"Camisa azul lisa"}. '
-            "No incluyas colores ni estilos; se combinarán desde las etapas anteriores. "
+            "No incluyas colores, estilos ni temporadas; se combinarán desde las etapas anteriores. "
             "Si apta es true, deja motivo_descarte vacío."
         ),
     ]
@@ -527,7 +550,7 @@ def wait_for_nim_request_slot() -> None:
 
 
 def validate_nim_stage_result(result: dict, stage: str) -> None:
-    if stage in {"colores", "estilos"}:
+    if stage in {"colores", "estilos", "temporadas"}:
         values = result.get(stage)
         if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
             raise ValueError(f"La etapa {stage} debe devolver una lista de texto.")
@@ -652,6 +675,65 @@ def _nim_catalog_values(result: dict, field: str, catalog: list[str]) -> list[st
     return accepted
 
 
+def _dynamic_catalog_values(result: dict, field: str) -> list[str]:
+    values = result.get(field, [])
+    if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
+        raise ValueError(f"El proveedor no devolvió una lista de texto para {field}.")
+    cleaned = []
+    seen = set()
+    for value in values:
+        normalized = " ".join(value.split())
+        if not normalized or len(normalized) > 40:
+            raise ValueError(f"Valor inválido propuesto para {field}.")
+        folded = normalized.casefold()
+        if folded not in seen:
+            cleaned.append(normalized)
+            seen.add(folded)
+    return cleaned[:2]
+
+
+def merge_catalog_values(
+    connection: sqlite3.Connection, code: str, values: list[str]
+) -> None:
+    if not values:
+        return
+    connection.execute("BEGIN IMMEDIATE")
+    row = connection.execute(
+        "SELECT valores_permitidos FROM catalogo_propiedad WHERE codigo=? AND activo=1",
+        (code,),
+    ).fetchone()
+    if row is None or row[0] is None:
+        connection.rollback()
+        raise ValueError(f"Falta propiedad activa con catálogo: {code}.")
+    try:
+        catalog = json.loads(row[0])
+    except json.JSONDecodeError as error:
+        connection.rollback()
+        raise ValueError(f"Catálogo JSON inválido para {code}.") from error
+    if not isinstance(catalog, list) or any(not isinstance(value, str) for value in catalog):
+        connection.rollback()
+        raise ValueError(f"Catálogo inválido para {code}.")
+    existing = {value.casefold() for value in catalog}
+    for value in values:
+        if value.casefold() not in existing:
+            catalog.append(value)
+            existing.add(value.casefold())
+    connection.execute(
+        "UPDATE catalogo_propiedad SET valores_permitidos=? WHERE codigo=?",
+        (json.dumps(catalog, ensure_ascii=False), code),
+    )
+    connection.commit()
+
+
+def merge_annotation_catalogs(
+    connection: sqlite3.Connection, annotation: dict | None
+) -> None:
+    if not annotation or not annotation.get("apta"):
+        return
+    merge_catalog_values(connection, "estilo", annotation["estilos"])
+    merge_catalog_values(connection, "temporada", annotation["temporadas"])
+
+
 def annotate_nim_image(
     path: Path,
     known_type: str,
@@ -660,17 +742,21 @@ def annotate_nim_image(
     model: str,
     colors: list[str],
     styles: list[str],
+    seasons: list[str],
     instructions: str,
 ) -> dict:
     image_url = image_data_url(path)
-    color_prompt, style_prompt, decision_prompt = build_nim_stage_prompts(
-        instructions, known_type, colors, styles
+    color_prompt, style_prompt, season_prompt, decision_prompt = build_nim_stage_prompts(
+        instructions, known_type, colors, styles, seasons
     )
     color_result = request_nim_stage_json(
         path, image_url, api_key, base_url, model, color_prompt, "colores"
     )
     style_result = request_nim_stage_json(
         path, image_url, api_key, base_url, model, style_prompt, "estilos"
+    )
+    season_result = request_nim_stage_json(
+        path, image_url, api_key, base_url, model, season_prompt, "temporadas"
     )
     decision = request_nim_stage_json(
         path, image_url, api_key, base_url, model, decision_prompt, "validación"
@@ -681,7 +767,8 @@ def annotate_nim_image(
     if reason is None and suitable:
         reason = ""
     colors_found = _nim_catalog_values(color_result, "colores", colors)
-    styles_found = _nim_catalog_values(style_result, "estilos", styles)
+    styles_found = _dynamic_catalog_values(style_result, "estilos")
+    seasons_found = _dynamic_catalog_values(season_result, "temporadas")
     if not suitable:
         return {
             "apta": False,
@@ -689,6 +776,7 @@ def annotate_nim_image(
             or "La IA descartó la imagen.",
             "colores": colors_found,
             "estilos": styles_found,
+            "temporadas": seasons_found,
         }
     description = decision.get("descripcion")
     if not isinstance(description, str) or not description.strip():
@@ -699,6 +787,7 @@ def annotate_nim_image(
         "descripcion": " ".join(description.split()[:8]),
         "colores": colors_found,
         "estilos": styles_found,
+        "temporadas": seasons_found,
     }
 
 
@@ -712,13 +801,15 @@ def annotate_image(
     colors: list[str],
     styles: list[str],
     instructions: str = DEFAULT_PROMPT_INSTRUCTIONS,
+    seasons: list[str] | None = None,
 ) -> dict:
     if provider == "nim":
         return annotate_nim_image(
-            path, known_type, api_key, base_url, model, colors, styles, instructions
+            path, known_type, api_key, base_url, model, colors, styles,
+            seasons or [], instructions
         )
     prompt = build_annotation_prompt(
-        instructions, known_type, colors, styles, provider
+        instructions, known_type, colors, styles, provider, seasons
     )
     payload = {
         "model": model,
@@ -831,13 +922,15 @@ def annotate_image(
     description = result.get("descripcion")
     if not isinstance(description, str) or not description.strip():
         raise ValueError("El proveedor no devolvió una descripcion no vacía.")
-    for field, vocabulary in (("colores", colors), ("estilos", styles)):
+    for field, vocabulary in (("colores", colors),):
         values = result.get(field, [])
         if not isinstance(values, list) or any(value not in vocabulary for value in values):
             raise ValueError(f"El campo {field} contiene valores fuera del catálogo.")
         result[field] = sorted(set(values))
         if provider == "nim":
             result[field] = result[field][:2]
+    styles_found = _dynamic_catalog_values(result, "estilos")
+    seasons_found = _dynamic_catalog_values(result, "temporadas")
     return {
         "apta": True,
         "motivo_descarte": "",
@@ -845,7 +938,8 @@ def annotate_image(
         if provider == "nim"
         else description.strip()[:1200],
         "colores": result["colores"],
-        "estilos": result["estilos"],
+        "estilos": styles_found,
+        "temporadas": seasons_found,
     }
 
 
@@ -922,7 +1016,11 @@ def import_one(
     )
 
     if annotation:
-        attributes = {"colores": annotation["colores"], "estilos": annotation["estilos"]}
+        attributes = {
+            "colores": annotation["colores"],
+            "estilos": annotation["estilos"],
+            "temporadas": annotation["temporadas"],
+        }
         connection.execute(
             """
             INSERT INTO descripcion_prenda
@@ -977,6 +1075,17 @@ def command_ingest(args: argparse.Namespace, selected: dict) -> int:
         if args.limit is None:
             raise ValueError("Las llamadas API requieren --limit para acotar costo y volumen.")
     api_key, base_url, model = provider_settings(args.provider)
+    deepseek_fallback = None
+    deepseek_fallback_suppressed = (
+        os.environ.get("NIM_DEEPSEEK_FALLBACK", "1").strip().lower()
+        in {"0", "false", "no"}
+    )
+    if (
+        args.provider == "nim"
+        and not deepseek_fallback_suppressed
+        and os.environ.get("DEEPSEEK_API_KEY", "").strip()
+    ):
+        deepseek_fallback = provider_settings("deepseek")
     dataset_root = Path(os.environ.get("DATASET_ROOT", "/app/dataset")).resolve()
     database = dataset_root / "metadata.sqlite"
     plans = []
@@ -1043,6 +1152,7 @@ def command_ingest(args: argparse.Namespace, selected: dict) -> int:
         connection.execute("PRAGMA foreign_keys = ON")
         colors = get_catalog(connection, "color")
         styles = get_catalog(connection, "estilo")
+        seasons = get_catalog(connection, "temporada")
         prompt_instructions = get_setting(
             connection, "prompt_instructions", DEFAULT_PROMPT_INSTRUCTIONS
         )
@@ -1061,6 +1171,8 @@ def command_ingest(args: argparse.Namespace, selected: dict) -> int:
 
             annotation = None
             fingerprint = None
+            result_provider = args.provider
+            result_model = model
             if args.provider != "none":
                 fingerprint = analysis_fingerprint(
                     item["digest"],
@@ -1073,6 +1185,7 @@ def command_ingest(args: argparse.Namespace, selected: dict) -> int:
                         colors,
                         styles,
                         args.provider,
+                        seasons,
                     ),
                 )
                 annotation = get_cached_analysis(connection, fingerprint)
@@ -1094,6 +1207,7 @@ def command_ingest(args: argparse.Namespace, selected: dict) -> int:
                                 colors,
                                 styles,
                                 prompt_instructions,
+                                seasons=seasons,
                             )
                             break
                         except AnnotationTimeoutError as error:
@@ -1151,10 +1265,100 @@ def command_ingest(args: argparse.Namespace, selected: dict) -> int:
                         source_id,
                     )
                     connection.commit()
+                merge_annotation_catalogs(connection, annotation)
+                styles = get_catalog(connection, "estilo")
+                seasons = get_catalog(connection, "temporada")
+                if args.provider == "nim" and not annotation["apta"]:
+                    if deepseek_fallback is None:
+                        if deepseek_fallback_suppressed:
+                            print(
+                                "La segunda evaluación se deja al lote DeepSeek que ya "
+                                "está ejecutándose en paralelo."
+                            )
+                        else:
+                            print(
+                                "Descarte de NIM sin segunda evaluación: DeepSeek no está "
+                                "configurado (falta DEEPSEEK_API_KEY)."
+                            )
+                    else:
+                        deepseek_key, deepseek_url, deepseek_model = deepseek_fallback
+                        deepseek_prompt = build_annotation_prompt(
+                            prompt_instructions,
+                            item["category"],
+                            colors,
+                            styles,
+                            "deepseek",
+                            seasons,
+                        )
+                        deepseek_fingerprint = analysis_fingerprint(
+                            item["digest"],
+                            item["category"],
+                            "deepseek",
+                            deepseek_model,
+                            deepseek_prompt,
+                        )
+                        deepseek_annotation = get_cached_analysis(
+                            connection, deepseek_fingerprint
+                        )
+                        if deepseek_annotation is not None:
+                            cache_hits += 1
+                        else:
+                            try:
+                                deepseek_annotation = annotate_image(
+                                    item["path"],
+                                    item["category"],
+                                    "deepseek",
+                                    deepseek_key,
+                                    deepseek_url,
+                                    deepseek_model,
+                                    colors,
+                                    styles,
+                                    prompt_instructions,
+                                    seasons=seasons,
+                                )
+                            except ProcessingCancelled:
+                                stopped = True
+                                print(
+                                    "Detención solicitada durante la segunda evaluación "
+                                    "de DeepSeek."
+                                )
+                                break
+                            except (AnnotationTimeoutError, ValueError) as error:
+                                invalid_annotations += isinstance(error, ValueError)
+                                print(
+                                    "DeepSeek no pudo completar la segunda evaluación; "
+                                    f"se conserva el descarte de NIM para "
+                                    f"{item['relative_path']}: {error}"
+                                )
+                                deepseek_annotation = None
+                            if deepseek_annotation is not None:
+                                save_analysis(
+                                    connection,
+                                    deepseek_fingerprint,
+                                    item,
+                                    "deepseek",
+                                    deepseek_model,
+                                    deepseek_annotation,
+                                    source_id,
+                                )
+                                connection.commit()
+                        if deepseek_annotation is not None:
+                            merge_annotation_catalogs(connection, deepseek_annotation)
+                            styles = get_catalog(connection, "estilo")
+                            seasons = get_catalog(connection, "temporada")
+                            annotation = deepseek_annotation
+                            fingerprint = deepseek_fingerprint
+                            result_provider = "deepseek"
+                            result_model = deepseek_model
+                            print(
+                                f"Segunda evaluación de DeepSeek completada para "
+                                f"{item['relative_path']}: "
+                                f"{'aceptada' if annotation['apta'] else 'descartada'}."
+                            )
                 if not annotation["apta"]:
                     rejected += 1
                     print(
-                        f"Descartada por IA ({source_id}/{item['label']}): "
+                        f"Descartada por {result_provider} ({source_id}/{item['label']}): "
                         f"{item['relative_path']} — {annotation['motivo_descarte']}"
                     )
                     continue
@@ -1168,8 +1372,8 @@ def command_ingest(args: argparse.Namespace, selected: dict) -> int:
                     source,
                     dataset_root,
                     annotation,
-                    args.provider,
-                    model,
+                    result_provider,
+                    result_model,
                     created_files,
                 ):
                     connection.commit()

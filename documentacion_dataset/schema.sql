@@ -112,6 +112,9 @@ VALUES
     ('estilo', 'Estilo', 'estilo',
      '["casual","deportivo","elegante","fiesta","formal","verano","unknown"]',
      'texto', 1),
+    ('temporada', 'Temporada', 'atributo',
+     '["primavera","verano","otoño","invierno","entretiempo","unknown"]',
+     'texto', 1),
     ('largo', 'Largo', 'atributo', NULL, 'texto', 0),
     ('corte', 'Corte', 'atributo', NULL, 'texto', 0),
     ('patron', 'Patrón', 'atributo', NULL, 'texto', 0);
