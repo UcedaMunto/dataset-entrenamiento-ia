@@ -65,8 +65,8 @@
           <div><label for="batchLimit">Máximo de imágenes</label><input id="batchLimit" type="number" min="1" max="1000" value="10" required></div>
         </div>
         <div class="job-checks">
-          <label><input id="confirmWrite" type="checkbox" required><span>Confirmo que el lote puede copiar imágenes al dataset y escribir en SQLite.</span></label>
-          <label id="remoteConsentRow" hidden><input id="confirmRemote" type="checkbox"><span>Autorizo enviar hasta el máximo indicado a una IA externa. Puede consumir cuota o generar cargos; revisé el proveedor elegido.</span></label>
+          <label><input id="confirmWrite" type="checkbox" checked required><span>Confirmo que el lote puede copiar imágenes al dataset y escribir en SQLite.</span></label>
+          <label id="remoteConsentRow" hidden><input id="confirmRemote" type="checkbox" checked><span>Autorizo enviar hasta el máximo indicado a una IA externa. Puede consumir cuota o generar cargos; revisé el proveedor elegido.</span></label>
         </div>
         <div class="row"><button id="startIngestButton" class="primary" type="submit">▶ Iniciar procesamiento</button><button id="stopIngestButton" class="danger" type="button" disabled>■ Detener envío</button><span id="jobMessage" role="status" class="muted">Elige una fuente y confirma antes de iniciar.</span></div>
         <p class="muted">Al detener, se evita iniciar más solicitudes. La imagen que ya esté siendo analizada puede terminar antes de cerrar el lote.</p>
@@ -231,7 +231,6 @@
       const remote=$("ingestProvider").value!=="none";
       $("remoteConsentRow").hidden=!remote;
       $("confirmRemote").required=remote;
-      if(!remote) $("confirmRemote").checked=false;
     }
     function openDialog(id) { $(id).showModal(); }
     function closeDialogs() { document.querySelectorAll("dialog").forEach(dialog=>dialog.close()); }
