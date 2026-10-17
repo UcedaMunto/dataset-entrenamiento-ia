@@ -3,6 +3,7 @@ import argparse
 import base64
 import csv
 import hashlib
+import heapq
 import json
 import os
 import random
@@ -26,12 +27,14 @@ IMAGE_EXTENSIONS = {".avif", ".bmp", ".gif", ".jpeg", ".jpg", ".png", ".webp"}
 REMOTE_IMAGE_EXTENSIONS = {".gif", ".jpeg", ".jpg", ".png", ".webp"}
 MAX_IMAGE_BYTES = 200_000
 NIM_MIN_REQUEST_INTERVAL_SECONDS = 3
-NIM_TIMEOUT_RETRY_MIN_SECONDS = 30
-NIM_TIMEOUT_RETRY_MAX_SECONDS = 120
+NIM_TIMEOUT_RETRY_MIN_SECONDS = 5
+NIM_TIMEOUT_RETRY_MAX_SECONDS = 15
 _nim_request_lock = threading.Lock()
 _last_nim_request_at: float | None = None
 NIM_MODEL_MAX_STRIKES = 4
 _nim_model_strikes: dict[str, int] = {}
+NIM_MODEL_COOLDOWN_SECONDS = 300
+_nim_model_cooldown_until: dict[str, float] = {}
 _NIM_PERMANENT_ERROR = re.compile(r"HTTP (401|403|404)\b")
 _NIM_TRANSIENT_ERROR = re.compile(r"HTTP (429|5\d\d)\b")
 CANCEL_REQUESTED = threading.Event()
@@ -40,6 +43,7 @@ NIM_ANALYSIS_PROMPT_VERSION = "5"
 NIM_VISION_MODEL = "nvidia/nemotron-3.5-super-vl-120b-a12b"
 DEFAULT_NIM_FALLBACK_MODELS = (
     "meta/llama-3.2-11b-vision-instruct",
+    "meta/llama-3.2-90b-vision-instruct",
     "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
 )
 DEFAULT_PROMPT_INSTRUCTIONS = (
@@ -640,7 +644,7 @@ def request_nim_stage_json(
                 f"{base_url}/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}"},
                 json=payload,
-                timeout=(15, 120),
+                timeout=(10, 40),
             )
             response.raise_for_status()
             body = response.json()
@@ -1016,11 +1020,23 @@ def annotate_with_provider_fallback(
     unavailable_nim_models = unavailable_nim_models if unavailable_nim_models is not None else set()
     candidates = [(provider, api_key, base_url, model)]
     if provider == "nim":
-        candidates = [
-            ("nim", api_key, base_url, candidate_model)
-            for candidate_model in nim_model_chain(model)
-            if candidate_model not in unavailable_nim_models
-        ]
+        while True:
+            chain = [m for m in nim_model_chain(model) if m not in unavailable_nim_models]
+            now = time.monotonic()
+            candidates = [
+                ("nim", api_key, base_url, m)
+                for m in chain
+                if _nim_model_cooldown_until.get(m, 0) <= now
+            ]
+            if candidates or not chain:
+                break
+            wait_seconds = min(_nim_model_cooldown_until[m] for m in chain) - now
+            print(
+                f"Todos los modelos NIM están en enfriamiento; se espera "
+                f"{int(wait_seconds) + 1} segundos antes de continuar."
+            )
+            if CANCEL_REQUESTED.wait(max(wait_seconds, 1)):
+                raise ProcessingCancelled("Detención solicitada durante el enfriamiento NIM.")
     elif provider == "deepseek" and nim_settings is not None:
         nim_key, nim_url, nim_model = nim_settings
         candidates.extend(
@@ -1058,6 +1074,7 @@ def annotate_with_provider_fallback(
                 unavailable_nim_models.update(failed_nim_models)
                 if candidate_provider == "nim":
                     _nim_model_strikes.pop(candidate_model, None)
+                    _nim_model_cooldown_until.pop(candidate_model, None)
                 if candidate_index:
                     print(
                         f"Fallback completado: {candidate_provider}/{candidate_model} "
@@ -1107,8 +1124,17 @@ def annotate_with_provider_fallback(
         if candidate_provider == "nim":
             strikes = _nim_model_strikes.get(candidate_model, 0) + 1
             _nim_model_strikes[candidate_model] = strikes
-            if strikes >= NIM_MODEL_MAX_STRIKES or _NIM_PERMANENT_ERROR.search(str(last_error)):
+            if _NIM_PERMANENT_ERROR.search(str(last_error)):
                 failed_nim_models.add(candidate_model)
+            elif strikes >= NIM_MODEL_MAX_STRIKES:
+                _nim_model_strikes.pop(candidate_model, None)
+                _nim_model_cooldown_until[candidate_model] = (
+                    time.monotonic() + NIM_MODEL_COOLDOWN_SECONDS
+                )
+                print(
+                    f"{candidate_model} entra en enfriamiento "
+                    f"{NIM_MODEL_COOLDOWN_SECONDS} segundos tras fallos repetidos."
+                )
         if candidate_index + 1 < len(candidates):
             next_provider, _, _, next_model = candidates[candidate_index + 1]
             print(
@@ -1126,6 +1152,9 @@ def annotate_with_provider_fallback(
             f"Timeout agotado para todos los modelos NIM disponibles; "
             f"se omite {path.name} sin guardar análisis."
         )
+        return None, provider, model, exhausted_timeouts
+    if provider == "nim" and _NIM_TRANSIENT_ERROR.search(str(last_error)):
+        print(f"Fallo transitorio de NIM; se omite {path.name} sin guardar análisis: {last_error}")
         return None, provider, model, exhausted_timeouts
     raise last_error
 
@@ -1226,6 +1255,29 @@ def import_one(
     return True
 
 
+def balance_plans_by_category(
+    plans: list[tuple[str, dict, dict]],
+    existing_counts: dict[str, int],
+    limit: int | None,
+) -> list[tuple[str, dict, dict]]:
+    """Prioriza las categorías con menos análisis aceptados hasta igualarlas."""
+    queues: dict[str, list] = {}
+    for plan in plans:
+        queues.setdefault(plan[2]["category"], []).append(plan)
+    heap = [(existing_counts.get(category, 0), category) for category in queues]
+    heapq.heapify(heap)
+    positions = dict.fromkeys(queues, 0)
+    selected = []
+    while heap and (limit is None or len(selected) < limit):
+        count, category = heapq.heappop(heap)
+        queue = queues[category]
+        selected.append(queue[positions[category]])
+        positions[category] += 1
+        if positions[category] < len(queue):
+            heapq.heappush(heap, (count + 1, category))
+    return selected
+
+
 def filter_duplicate_plans(
     plans: list[tuple[str, dict, dict]],
     database: Path,
@@ -1234,6 +1286,7 @@ def filter_duplicate_plans(
     limit: int | None,
 ) -> tuple[list[tuple[str, dict, dict]], int, int, int]:
     imported_hashes = set()
+    category_counts: dict[str, int] = {}
     cached_analyses = {}
     colors = []
     styles = []
@@ -1245,6 +1298,13 @@ def filter_duplicate_plans(
                 row[0]
                 for row in connection.execute(
                     "SELECT DISTINCT sha256 FROM prenda_imagen WHERE sha256 IS NOT NULL"
+                )
+            }
+            category_counts = {
+                row[0]: row[1]
+                for row in connection.execute(
+                    "SELECT categoria, COUNT(DISTINCT sha256) FROM analisis_imagen "
+                    "WHERE estado = 'aceptada' GROUP BY categoria"
                 )
             }
             if provider != "none":
@@ -1297,7 +1357,7 @@ def filter_duplicate_plans(
                 continue
         new_plans.append(plan)
 
-    selected_new = new_plans if limit is None else new_plans[:limit]
+    selected_new = balance_plans_by_category(new_plans, category_counts, limit)
     return (
         recoverable_plans + selected_new,
         duplicates,

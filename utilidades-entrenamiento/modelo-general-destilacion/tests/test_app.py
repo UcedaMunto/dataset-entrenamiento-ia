@@ -81,6 +81,7 @@ class CurationPipelineTests(unittest.TestCase):
     def setUp(self):
         app.CANCEL_REQUESTED.clear()
         app._nim_model_strikes.clear()
+        app._nim_model_cooldown_until.clear()
         strikes_patch = patch.object(app, "NIM_MODEL_MAX_STRIKES", 1)
         strikes_patch.start()
         self.addCleanup(strikes_patch.stop)
@@ -268,6 +269,18 @@ class CurationPipelineTests(unittest.TestCase):
         self.assertEqual(annotate.call_count, 2)
         self.assertEqual(unavailable_models, set())
 
+    def test_batch_limit_prioritizes_least_represented_categories(self):
+        def plan(category, index):
+            return ("s", {}, {"category": category, "digest": f"{category}{index}"})
+
+        plans = [plan("blusa", i) for i in range(5)] + [plan("sueter", i) for i in range(5)]
+        plans += [plan("falda", i) for i in range(2)]
+        selected = app.balance_plans_by_category(plans, {"blusa": 10, "falda": 3}, 6)
+        categories = [item[2]["category"] for item in selected]
+        self.assertEqual(categories.count("sueter"), 4)
+        self.assertEqual(categories.count("falda"), 2)
+        self.assertNotIn("blusa", categories)
+
     def test_default_nim_model_chain_includes_two_additional_vision_models(self):
         with patch.dict(os.environ, {"NVIDIA_NIM_FALLBACK_MODELS": ""}):
             self.assertEqual(
@@ -275,6 +288,7 @@ class CurationPipelineTests(unittest.TestCase):
                 [
                     "primary-model",
                     "meta/llama-3.2-11b-vision-instruct",
+                    "meta/llama-3.2-90b-vision-instruct",
                     "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
                 ],
             )
@@ -662,7 +676,7 @@ class CurationPipelineTests(unittest.TestCase):
         self.assertTrue(result["apta"])
         self.assertEqual(result["motivo_descarte"], "")
 
-    def test_invalid_annotations_exhausting_nim_stop_batch_without_retries(self):
+    def test_invalid_annotations_exhausting_nim_cool_down_then_batch_continues(self):
         second_path = self.root / "shirt-two.png"
         Image.new("RGB", (16, 16), (90, 20, 40)).save(second_path)
         second_item = {
@@ -677,15 +691,19 @@ class CurationPipelineTests(unittest.TestCase):
             side_effect=[
                 ValueError("invalid provider shape"),
                 ValueError("fallback response also invalid"),
+                {"apta": True, "motivo_descarte": "", "descripcion": "Camisa azul.", "colores": ["azul"], "estilos": ["casual"], "temporadas": ["invierno"]},
             ],
-        ) as annotate:
-            with self.assertRaisesRegex(RuntimeError, "No quedan modelos NVIDIA NIM"):
-                self.run_ingest(items=[self.item, second_item])
+        ) as annotate, patch.object(
+            app.CANCEL_REQUESTED,
+            "wait",
+            side_effect=lambda seconds: app._nim_model_cooldown_until.clear() or False,
+        ) as wait:
+            self.run_ingest(items=[self.item, second_item])
 
-        self.assertEqual(annotate.call_count, 2)
+        self.assertEqual(annotate.call_count, 3)
+        wait.assert_called_once()
         with sqlite3.connect(self.database) as connection:
-            self.assertEqual(connection.execute("SELECT COUNT(*) FROM analisis_imagen").fetchone()[0], 0)
-            self.assertEqual(connection.execute("SELECT COUNT(*) FROM prenda").fetchone()[0], 0)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM analisis_imagen").fetchone()[0], 1)
 
     def test_stop_after_current_analysis_prevents_sending_the_next_image(self):
         second_path = self.root / "shirt-after-stop.png"
@@ -741,7 +759,7 @@ class CurationPipelineTests(unittest.TestCase):
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM analisis_imagen").fetchone()[0], 0)
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM prenda").fetchone()[0], 0)
 
-    def test_nim_timeout_retries_models_then_stops_after_chain_is_exhausted(self):
+    def test_nim_timeout_retries_models_then_skips_image_and_continues_after_cooldown(self):
         second_path = self.root / "shirt-after-timeout.png"
         Image.new("RGB", (16, 16), (90, 20, 40)).save(second_path)
         second_item = {
@@ -759,30 +777,28 @@ class CurationPipelineTests(unittest.TestCase):
                     app.AnnotationTimeoutError("second timeout"),
                     app.AnnotationTimeoutError("fallback first timeout"),
                     app.AnnotationTimeoutError("fallback second timeout"),
+                    {"apta": True, "motivo_descarte": "", "descripcion": "Camisa azul.", "colores": ["azul"], "estilos": ["casual"], "temporadas": ["invierno"]},
                 ],
             ) as annotate,
             patch.object(app.random, "randint", return_value=73) as randint,
-            patch.object(app.CANCEL_REQUESTED, "wait", return_value=False) as wait,
+            patch.object(
+                app.CANCEL_REQUESTED,
+                "wait",
+                side_effect=lambda seconds: app._nim_model_cooldown_until.clear() or False,
+            ) as wait,
         ):
-            with self.assertRaisesRegex(RuntimeError, "No quedan modelos NVIDIA NIM"):
-                self.run_ingest(items=[self.item, second_item])
+            self.run_ingest(items=[self.item, second_item])
 
-        self.assertEqual(annotate.call_count, 4)
+        self.assertEqual(annotate.call_count, 5)
         self.assertEqual(
             [call.args[0] for call in annotate.call_args_list],
-            [
-                self.item["path"],
-                self.item["path"],
-                self.item["path"],
-                self.item["path"],
-            ],
+            [self.item["path"]] * 4 + [second_item["path"]],
         )
-        self.assertEqual(randint.call_count, 2)
-        self.assertEqual(randint.call_args_list, [unittest.mock.call(30, 120)] * 2)
-        self.assertEqual(wait.call_args_list, [unittest.mock.call(73)] * 2)
+        self.assertEqual(randint.call_args_list, [unittest.mock.call(5, 15)] * 2)
+        self.assertEqual(wait.call_args_list[:2], [unittest.mock.call(73)] * 2)
         with sqlite3.connect(self.database) as connection:
-            self.assertEqual(connection.execute("SELECT COUNT(*) FROM analisis_imagen").fetchone()[0], 0)
-            self.assertEqual(connection.execute("SELECT COUNT(*) FROM prenda_imagen").fetchone()[0], 0)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM analisis_imagen").fetchone()[0], 1)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM prenda_imagen").fetchone()[0], 1)
 
     def test_imported_images_are_filtered_before_applying_batch_limit(self):
         items = [self.item]
