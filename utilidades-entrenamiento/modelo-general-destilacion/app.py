@@ -34,6 +34,10 @@ CANCEL_REQUESTED = threading.Event()
 ANALYSIS_PROMPT_VERSION = "4"
 NIM_ANALYSIS_PROMPT_VERSION = "5"
 NIM_VISION_MODEL = "nvidia/nemotron-3.5-super-vl-120b-a12b"
+DEFAULT_NIM_FALLBACK_MODELS = (
+    "meta/llama-3.2-11b-vision-instruct",
+    "nvidia/nemotron-3.5-super-vl-120b-a12b",
+)
 DEFAULT_PROMPT_INSTRUCTIONS = (
     "Determina si la imagen muestra claramente una sola prenda de la clase indicada. "
     "Si no corresponde a la clase, está corrupta, es ilegible, contiene principalmente "
@@ -91,6 +95,20 @@ def normalize(value: str) -> str:
     value = unicodedata.normalize("NFKD", value.casefold())
     value = "".join(char for char in value if not unicodedata.combining(char))
     return re.sub(r"[^a-z0-9]+", "-", value).strip("-")
+
+
+def canonical_category(value: str) -> str:
+    return "camisa" if normalize(value) in {"camisa", "camiseta"} else value
+
+
+def nim_model_chain(primary_model: str) -> list[str]:
+    configured = os.environ.get("NVIDIA_NIM_FALLBACK_MODELS", "")
+    fallback_models = (
+        [model.strip() for model in configured.split(",") if model.strip()]
+        if configured.strip()
+        else list(DEFAULT_NIM_FALLBACK_MODELS)
+    )
+    return list(dict.fromkeys([primary_model, *fallback_models]))
 
 
 def load_sources() -> dict:
@@ -179,6 +197,7 @@ def scan_source(source_root: Path, source: dict) -> tuple[list[dict], dict]:
         if category is None:
             counts["unmapped"] += 1
             continue
+        category = canonical_category(category)
         counts["mapped"] += 1
         digest = file_digest(path)
         items.append({
@@ -214,6 +233,7 @@ def scan_labeled_csv(source_root: Path, source: dict) -> tuple[list[dict], dict]
                 if category is None:
                     counts["unmapped"] += 1
                     continue
+                category = canonical_category(category)
                 image_id = Path(row["image"]).name
                 image_path = (source_root / source["image_dir"] / f"{image_id}.jpg").resolve()
                 if not image_path.is_relative_to(source_root.resolve()):
@@ -964,6 +984,107 @@ def annotate_image(
     }
 
 
+def annotate_with_provider_fallback(
+    path: Path,
+    known_type: str,
+    provider: str,
+    api_key: str,
+    base_url: str,
+    model: str,
+    colors: list[str],
+    styles: list[str],
+    instructions: str,
+    seasons: list[str],
+    nim_settings: tuple[str, str, str] | None = None,
+    unavailable_nim_models: set[str] | None = None,
+) -> tuple[dict, str, str, int]:
+    unavailable_nim_models = unavailable_nim_models if unavailable_nim_models is not None else set()
+    candidates = [(provider, api_key, base_url, model)]
+    if provider == "nim":
+        candidates = [
+            ("nim", api_key, base_url, candidate_model)
+            for candidate_model in nim_model_chain(model)
+            if candidate_model not in unavailable_nim_models
+        ]
+    elif provider == "deepseek" and nim_settings is not None:
+        nim_key, nim_url, nim_model = nim_settings
+        candidates.extend(
+            ("nim", nim_key, nim_url, candidate_model)
+            for candidate_model in nim_model_chain(nim_model)
+            if candidate_model not in unavailable_nim_models
+        )
+
+    exhausted_timeouts = 0
+    last_error: RuntimeError | ValueError | None = None
+    for candidate_index, (candidate_provider, candidate_key, candidate_url, candidate_model) in enumerate(candidates):
+        attempts = 2 if candidate_provider == "nim" else 1
+        for attempt in range(attempts):
+            if CANCEL_REQUESTED.is_set():
+                raise ProcessingCancelled("Detención solicitada antes de completar la anotación.")
+            try:
+                annotation = annotate_image(
+                    path,
+                    known_type,
+                    candidate_provider,
+                    candidate_key,
+                    candidate_url,
+                    candidate_model,
+                    colors,
+                    styles,
+                    instructions,
+                    seasons=seasons,
+                )
+                if candidate_index:
+                    print(
+                        f"Fallback completado: {candidate_provider}/{candidate_model} "
+                        f"para {path.name}."
+                    )
+                return annotation, candidate_provider, candidate_model, exhausted_timeouts
+            except ProcessingCancelled:
+                raise
+            except AnnotationTimeoutError as error:
+                last_error = error
+                if CANCEL_REQUESTED.is_set():
+                    raise ProcessingCancelled(
+                        "Detención solicitada; no se reintentará la petición NIM."
+                    ) from error
+                if attempt == 0 and candidate_provider == "nim":
+                    delay = random.randint(
+                        NIM_TIMEOUT_RETRY_MIN_SECONDS,
+                        NIM_TIMEOUT_RETRY_MAX_SECONDS,
+                    )
+                    print(
+                        f"Timeout de NIM para {path.name} con {candidate_model}; "
+                        f"se reintentará una vez en {delay} segundos."
+                    )
+                    if CANCEL_REQUESTED.wait(delay):
+                        raise ProcessingCancelled(
+                            "Detención solicitada durante la espera de reintento NIM."
+                        ) from error
+                    continue
+                if candidate_provider == "nim":
+                    exhausted_timeouts += 1
+                break
+            except (RuntimeError, ValueError) as error:
+                last_error = error
+                break
+
+        if candidate_provider == "nim":
+            unavailable_nim_models.add(candidate_model)
+        if candidate_index + 1 < len(candidates):
+            next_provider, _, _, next_model = candidates[candidate_index + 1]
+            print(
+                f"Falló {candidate_provider}/{candidate_model} para {path.name}: "
+                f"{last_error}. Se intentará {next_provider}/{next_model}."
+            )
+
+    if last_error is None:
+        raise RuntimeError("No se pudo iniciar la anotación con ningún proveedor.")
+    if provider == "deepseek" and nim_settings is None:
+        print("No se pudo usar el fallback NVIDIA NIM: falta NVIDIA_NIM_API_KEY.")
+    raise last_error
+
+
 def safe_extension(path: Path) -> str:
     extension = path.suffix.lower()
     return extension if extension in IMAGE_EXTENSIONS else ".jpg"
@@ -989,7 +1110,8 @@ def import_one(
         return False
 
     code = f"{source_id}-{item['digest'][:16]}"
-    category_path = CATEGORY_PATHS[item["category"]]
+    category = canonical_category(item["category"])
+    category_path = CATEGORY_PATHS[category]
     folder = dataset_root / category_path / code
     folder.mkdir(parents=True, exist_ok=True)
     image_path = folder / f"imagen{safe_extension(item['path'])}"
@@ -1033,7 +1155,7 @@ def import_one(
         raise ValueError("El catálogo SQLite no contiene tipo_prenda.")
     connection.execute(
         "INSERT INTO valor_propiedad_prenda (id_prenda, id_propiedad, valor) VALUES (?, ?, ?)",
-        (garment_id, type_property[0], item["category"]),
+        (garment_id, type_property[0], category),
     )
 
     if annotation:
@@ -1060,9 +1182,18 @@ def import_one(
 
 
 def filter_duplicate_plans(
-    plans: list[tuple[str, dict, dict]], database: Path
-) -> tuple[list[tuple[str, dict, dict]], int]:
+    plans: list[tuple[str, dict, dict]],
+    database: Path,
+    provider: str,
+    model: str,
+    limit: int | None,
+) -> tuple[list[tuple[str, dict, dict]], int, int, int]:
     imported_hashes = set()
+    cached_analyses = {}
+    colors = []
+    styles = []
+    seasons = []
+    instructions = DEFAULT_PROMPT_INSTRUCTIONS
     if database.is_file():
         with sqlite3.connect(database, timeout=30) as connection:
             imported_hashes = {
@@ -1071,18 +1202,63 @@ def filter_duplicate_plans(
                     "SELECT DISTINCT sha256 FROM prenda_imagen WHERE sha256 IS NOT NULL"
                 )
             }
+            if provider != "none":
+                cached_analyses = {
+                    row[0]: row[1]
+                    for row in connection.execute(
+                        "SELECT huella_analisis, resultado_json FROM analisis_imagen"
+                    )
+                }
+                colors = get_catalog(connection, "color")
+                styles = get_catalog(connection, "estilo")
+                seasons = get_catalog(connection, "temporada")
+                instructions = get_setting(
+                    connection, "prompt_instructions", DEFAULT_PROMPT_INSTRUCTIONS
+                )
 
     seen_hashes = set(imported_hashes)
-    unique_plans = []
+    new_plans = []
+    recoverable_plans = []
     duplicates = 0
+    already_analyzed = 0
     for plan in plans:
         digest = plan[2]["digest"]
         if digest in seen_hashes:
             duplicates += 1
             continue
         seen_hashes.add(digest)
-        unique_plans.append(plan)
-    return unique_plans, duplicates
+        if provider != "none":
+            _, _, item = plan
+            prompt = build_annotation_prompt(
+                instructions, item["category"], colors, styles, provider, seasons
+            )
+            fingerprint = analysis_fingerprint(
+                digest, item["category"], provider, model, prompt
+            )
+            cached_json = cached_analyses.get(fingerprint)
+            if cached_json is not None:
+                try:
+                    cached = json.loads(cached_json)
+                except json.JSONDecodeError as error:
+                    raise ValueError(
+                        f"Resultado cacheado inválido para {fingerprint}."
+                    ) from error
+                if not isinstance(cached, dict) or not isinstance(cached.get("apta"), bool):
+                    raise ValueError(f"Resultado cacheado inválido para {fingerprint}.")
+                if cached["apta"]:
+                    recoverable_plans.append(plan)
+                else:
+                    already_analyzed += 1
+                continue
+        new_plans.append(plan)
+
+    selected_new = new_plans if limit is None else new_plans[:limit]
+    return (
+        recoverable_plans + selected_new,
+        duplicates,
+        already_analyzed,
+        len(recoverable_plans),
+    )
 
 
 def command_ingest(args: argparse.Namespace, selected: dict) -> int:
@@ -1097,6 +1273,7 @@ def command_ingest(args: argparse.Namespace, selected: dict) -> int:
             raise ValueError("Las llamadas API requieren --limit para acotar costo y volumen.")
     api_key, base_url, model = provider_settings(args.provider)
     deepseek_fallback = None
+    nim_fallback = None
     deepseek_fallback_suppressed = (
         os.environ.get("NIM_DEEPSEEK_FALLBACK", "1").strip().lower()
         in {"0", "false", "no"}
@@ -1107,6 +1284,11 @@ def command_ingest(args: argparse.Namespace, selected: dict) -> int:
         and os.environ.get("DEEPSEEK_API_KEY", "").strip()
     ):
         deepseek_fallback = provider_settings("deepseek")
+    if (
+        args.provider == "deepseek"
+        and os.environ.get("NVIDIA_NIM_API_KEY", "").strip()
+    ):
+        nim_fallback = provider_settings("nim")
     dataset_root = Path(os.environ.get("DATASET_ROOT", "/app/dataset")).resolve()
     database = dataset_root / "metadata.sqlite"
     plans = []
@@ -1141,21 +1323,29 @@ def command_ingest(args: argparse.Namespace, selected: dict) -> int:
 
     if args.execute and plans:
         ensure_database(database)
-    plans, pre_skipped_duplicates = filter_duplicate_plans(plans, database)
-    if args.limit is not None:
-        plans = plans[:args.limit]
+    plans, pre_skipped_duplicates, pre_skipped_analyzed, recovered_cached = (
+        filter_duplicate_plans(plans, database, args.provider, model, args.limit)
+    )
     print(
-        f"Imágenes preparadas para procesar: {len(plans)}; proveedor={args.provider}; "
+        f"Imágenes nuevas para analizar: {len(plans) - recovered_cached}; "
+        f"análisis aceptados pendientes de importar={recovered_cached}; "
+        f"proveedor={args.provider}; "
         f"formatos no admitidos omitidos={skipped_remote_format}; "
+        f"ya analizadas omitidas={pre_skipped_analyzed}; "
         f"duplicadas omitidas antes de IA={pre_skipped_duplicates}."
     )
     if not args.execute:
         print("Ensayo solamente. Añade --execute para copiar imágenes y escribir SQLite.")
         return 0
     if not plans:
-        if pre_skipped_duplicates:
+        if pre_skipped_analyzed and not pre_skipped_duplicates:
             print(
-                "Todas las imágenes elegibles ya estaban importadas; "
+                "Todas las imágenes elegibles ya tienen un análisis vigente para este "
+                "proveedor y configuración."
+            )
+        elif pre_skipped_duplicates:
+            print(
+                "Todas las imágenes elegibles ya estaban importadas o analizadas; "
                 "se omitieron antes de llamar a la IA."
             )
         else:
@@ -1169,6 +1359,7 @@ def command_ingest(args: argparse.Namespace, selected: dict) -> int:
     invalid_annotations = 0
     timed_out_images = 0
     stopped = False
+    unavailable_nim_models: set[str] = set()
     with sqlite3.connect(database, timeout=30) as connection:
         connection.execute("PRAGMA foreign_keys = ON")
         colors = get_catalog(connection, "color")
@@ -1213,75 +1404,62 @@ def command_ingest(args: argparse.Namespace, selected: dict) -> int:
                 if annotation is not None:
                     cache_hits += 1
                 else:
-                    for attempt in range(2):
-                        if CANCEL_REQUESTED.is_set():
-                            stopped = True
-                            break
-                        try:
-                            annotation = annotate_image(
-                                item["path"],
-                                item["category"],
-                                args.provider,
-                                api_key,
-                                base_url,
-                                model,
-                                colors,
-                                styles,
-                                prompt_instructions,
-                                seasons=seasons,
-                            )
-                            break
-                        except AnnotationTimeoutError as error:
-                            if args.provider != "nim":
-                                raise
-                            if attempt == 0:
-                                if CANCEL_REQUESTED.is_set():
-                                    stopped = True
-                                    break
-                                delay = random.randint(
-                                    NIM_TIMEOUT_RETRY_MIN_SECONDS,
-                                    NIM_TIMEOUT_RETRY_MAX_SECONDS,
-                                )
-                                print(
-                                    f"Timeout de NIM para {item['relative_path']}; "
-                                    f"se reintentará la misma imagen en {delay} segundos."
-                                )
-                                if CANCEL_REQUESTED.wait(delay):
-                                    stopped = True
-                                    print(
-                                        "Detención solicitada durante la espera; "
-                                        "no se reintentará ni se enviarán más imágenes."
-                                    )
-                                    break
-                            else:
-                                timed_out_images += 1
-                                print(
-                                    f"Segundo timeout de NIM; imagen omitida y se continúa "
-                                    f"con la siguiente ({source_id}/{item['label']}): "
-                                    f"{item['relative_path']} — {error}"
-                                )
-                        except ProcessingCancelled:
-                            stopped = True
-                            break
-                        except ValueError as error:
-                            invalid_annotations += 1
-                            print(
-                                f"Respuesta inválida de IA; imagen omitida sin guardar "
-                                f"análisis ({source_id}/{item['label']}): "
-                                f"{item['relative_path']} — {error}"
-                            )
-                            break
-                    if stopped:
+                    try:
+                        (
+                            annotation,
+                            result_provider,
+                            result_model,
+                            exhausted_timeouts,
+                        ) = annotate_with_provider_fallback(
+                            item["path"],
+                            item["category"],
+                            args.provider,
+                            api_key,
+                            base_url,
+                            model,
+                            colors,
+                            styles,
+                            prompt_instructions,
+                            seasons,
+                            nim_settings=nim_fallback,
+                            unavailable_nim_models=unavailable_nim_models,
+                        )
+                        timed_out_images += exhausted_timeouts
+                    except ProcessingCancelled:
+                        stopped = True
                         print("Detención solicitada; no se enviarán más imágenes.")
                         break
-                    if annotation is None:
+                    except ValueError as error:
+                        invalid_annotations += 1
+                        print(
+                            f"Respuesta inválida de IA; imagen omitida sin guardar "
+                            f"análisis ({source_id}/{item['label']}): "
+                            f"{item['relative_path']} — {error}"
+                        )
                         continue
+                    if result_provider == "nim" and args.provider == "nim":
+                        model = result_model
+                    result_prompt = build_annotation_prompt(
+                        prompt_instructions,
+                        item["category"],
+                        colors,
+                        styles,
+                        result_provider,
+                        seasons,
+                    )
+                    fingerprint = analysis_fingerprint(
+                        item["digest"],
+                        item["category"],
+                        result_provider,
+                        result_model,
+                        result_prompt,
+                    )
                     save_analysis(
                         connection,
                         fingerprint,
                         item,
-                        args.provider,
-                        model,
+                        result_provider,
+                        result_model,
                         annotation,
                         source_id,
                     )
@@ -1418,6 +1596,7 @@ def command_ingest(args: argparse.Namespace, selected: dict) -> int:
 
     print(
         f"Importadas: {imported}; duplicadas omitidas: {skipped}; "
+        f"ya analizadas omitidas: {pre_skipped_analyzed}; "
         f"descartadas por IA: {rejected}; análisis reutilizados: {cache_hits}; "
         f"respuestas inválidas omitidas: {invalid_annotations}; "
         f"timeouts agotados omitidos: {timed_out_images}; "

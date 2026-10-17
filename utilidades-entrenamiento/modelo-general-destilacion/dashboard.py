@@ -72,8 +72,18 @@ def validate_ingest_request(payload: dict) -> tuple[str, str, int, dict[str, str
     if not isinstance(source_id, str):
         raise ValueError("Selecciona una fuente de datos válida.")
     sources = app.load_sources()
-    source = sources.get(source_id)
-    if not source or not source.get("allow_import") or source.get("benchmark_only"):
+    eligible_sources = {
+        key: source for key, source in sources.items()
+        if source.get("allow_import") and not source.get("benchmark_only")
+    }
+    source = eligible_sources if source_id == "all" else sources.get(source_id)
+    if (
+        not source
+        or (
+            source_id != "all"
+            and (not source.get("allow_import") or source.get("benchmark_only"))
+        )
+    ):
         raise ValueError("La fuente seleccionada no está habilitada para importar.")
     if provider not in {"none", "nim", "deepseek"}:
         raise ValueError("Selecciona Sin IA, NVIDIA NIM o DeepSeek.")
@@ -557,9 +567,12 @@ def get_overview() -> dict:
         "providers": providers,
         "selected_provider": selected_provider,
         "sources": [
+            {"id": "all", "label": "Todas las fuentes elegibles (recomendado)"},
+            *[
             {"id": source_id, "label": source_id}
             for source_id, source in app.load_sources().items()
             if source.get("allow_import") and not source.get("benchmark_only")
+            ],
         ],
     }
 

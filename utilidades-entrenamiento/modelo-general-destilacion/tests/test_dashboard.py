@@ -243,7 +243,7 @@ class DashboardTests(unittest.TestCase):
 
     def test_ingest_accepts_5000_and_rejects_more(self):
         payload = {
-            "source": "clothing-full",
+            "source": "all",
             "provider": "none",
             "limit": 5000,
             "confirm_write": True,

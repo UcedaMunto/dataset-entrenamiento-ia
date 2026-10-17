@@ -156,6 +156,84 @@ class CurationPipelineTests(unittest.TestCase):
         self.assertNotEqual(first, app.analysis_fingerprint(self.digest, "camisa", "deepseek", "test-model"))
         self.assertNotEqual(first, app.analysis_fingerprint(self.digest, "chaqueta", "nim", "test-model"))
 
+    def test_nim_automatically_switches_to_fallback_model_after_failure(self):
+        annotation = {"apta": False, "motivo_descarte": "No es una camisa."}
+        with patch.dict(
+            os.environ,
+            {"NVIDIA_NIM_FALLBACK_MODELS": "meta/llama-3.2-11b-vision-instruct"},
+        ), patch.object(
+            app,
+            "annotate_image",
+            side_effect=[RuntimeError("NIM HTTP 500"), annotation],
+        ) as annotate:
+            result = app.annotate_with_provider_fallback(
+                self.image_path,
+                "camisa",
+                "nim",
+                "nim-key",
+                "https://nim.test/v1",
+                "nvidia/nemotron-3.5-super-vl-120b-a12b",
+                ["azul"],
+                ["casual"],
+                app.DEFAULT_PROMPT_INSTRUCTIONS,
+                ["invierno"],
+            )
+
+        self.assertEqual(
+            result[:3],
+            (annotation, "nim", "meta/llama-3.2-11b-vision-instruct"),
+        )
+        self.assertEqual(
+            [call.args[5] for call in annotate.call_args_list],
+            [
+                "nvidia/nemotron-3.5-super-vl-120b-a12b",
+                "meta/llama-3.2-11b-vision-instruct",
+            ],
+        )
+
+    def test_deepseek_failure_falls_back_to_nim(self):
+        annotation = {
+            "apta": True,
+            "motivo_descarte": "",
+            "descripcion": "Camisa azul.",
+            "colores": ["azul"],
+            "estilos": [],
+            "temporadas": [],
+        }
+        with patch.dict(
+            os.environ,
+            {"NVIDIA_NIM_FALLBACK_MODELS": "meta/llama-3.2-11b-vision-instruct"},
+        ), patch.object(
+            app,
+            "annotate_image",
+            side_effect=[RuntimeError("DeepSeek API unavailable"), annotation],
+        ) as annotate:
+            result = app.annotate_with_provider_fallback(
+                self.image_path,
+                "camisa",
+                "deepseek",
+                "deepseek-key",
+                "https://deepseek.test/v1",
+                "deepseek-flash",
+                ["azul"],
+                ["casual"],
+                app.DEFAULT_PROMPT_INSTRUCTIONS,
+                ["invierno"],
+                nim_settings=(
+                    "nim-key",
+                    "https://nim.test/v1",
+                    "nvidia/nemotron-3.5-super-vl-120b-a12b",
+                ),
+            )
+
+        self.assertEqual(
+            result[:3],
+            (annotation, "nim", "nvidia/nemotron-3.5-super-vl-120b-a12b"),
+        )
+        self.assertEqual(
+            [call.args[2] for call in annotate.call_args_list], ["deepseek", "nim"]
+        )
+
     def test_cached_accepted_analysis_is_imported_without_reanalysis(self):
         result = {
             "apta": True,
@@ -255,6 +333,92 @@ class CurationPipelineTests(unittest.TestCase):
         with sqlite3.connect(self.database) as connection:
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM analisis_imagen").fetchone()[0], 1)
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM prenda").fetchone()[0], 0)
+
+    def test_existing_rejections_do_not_consume_the_new_analysis_limit(self):
+        rejection = {"apta": False, "motivo_descarte": "No corresponde a camisa."}
+        prompt = app.build_annotation_prompt(
+            app.DEFAULT_PROMPT_INSTRUCTIONS, "camisa", ["azul"], ["casual"], "nim",
+            ["invierno"],
+        )
+        fingerprint = app.analysis_fingerprint(
+            self.digest, "camisa", "nim", "test-model", prompt
+        )
+        with sqlite3.connect(self.database) as connection:
+            app.save_analysis(
+                connection, fingerprint, self.item, "nim", "test-model", rejection
+            )
+
+        unprocessed = []
+        for index, color in enumerate(((30, 100, 50), (160, 80, 30)), start=1):
+            path = self.root / f"new-shirt-{index}.png"
+            Image.new("RGB", (16, 16), color).save(path)
+            unprocessed.append({
+                **self.item,
+                "path": path,
+                "relative_path": Path(f"train/camisa/new-shirt-{index}.png"),
+                "digest": hashlib.sha256(path.read_bytes()).hexdigest(),
+            })
+        accepted = {
+            "apta": True,
+            "motivo_descarte": "",
+            "descripcion": "Camisa verde.",
+            "colores": ["azul"],
+            "estilos": ["casual"],
+            "temporadas": [],
+        }
+        with patch.object(app, "annotate_image", return_value=accepted) as annotate:
+            self.assertEqual(
+                self.run_ingest(items=[self.item, *unprocessed], limit=1), 0
+            )
+
+        annotate.assert_called_once()
+        self.assertEqual(annotate.call_args.args[0], unprocessed[0]["path"])
+
+    def test_deepseek_failure_persists_nim_fallback_result_and_model(self):
+        accepted = {
+            "apta": True,
+            "motivo_descarte": "",
+            "descripcion": "Camisa azul.",
+            "colores": ["azul"],
+            "estilos": ["casual"],
+            "temporadas": [],
+        }
+        with patch.dict(
+            os.environ,
+            {
+                "DEEPSEEK_API_KEY": "test-deepseek-key",
+                "NVIDIA_NIM_API_KEY": "test-nim-key",
+                "NVIDIA_NIM_FALLBACK_MODELS": "meta/llama-3.2-11b-vision-instruct",
+            },
+        ), patch.object(
+            app,
+            "annotate_image",
+            side_effect=[RuntimeError("DeepSeek unavailable"), accepted],
+        ) as annotate:
+            self.assertEqual(self.run_ingest(
+                provider="deepseek",
+                settings=[
+                    ("test-deepseek-key", "https://deepseek.test/v1", "deepseek-model"),
+                    ("test-nim-key", "https://nim.test/v1", "nim-model"),
+                ],
+            ), 0)
+
+        self.assertEqual(
+            [call.args[2] for call in annotate.call_args_list], ["deepseek", "nim"]
+        )
+        with sqlite3.connect(self.database) as connection:
+            self.assertEqual(
+                connection.execute(
+                    "SELECT proveedor, modelo FROM analisis_imagen"
+                ).fetchone(),
+                ("nim", "nim-model"),
+            )
+            self.assertEqual(
+                connection.execute(
+                    "SELECT proveedor, modelo FROM descripcion_prenda"
+                ).fetchone(),
+                ("nim", "nim-model"),
+            )
 
     def test_nim_rejection_is_rechecked_by_deepseek_and_imported_if_accepted(self):
         nim_rejection = {
@@ -429,11 +593,15 @@ class CurationPipelineTests(unittest.TestCase):
         with patch.object(
             app,
             "annotate_image",
-            side_effect=[ValueError("invalid provider shape"), valid_annotation],
+            side_effect=[
+                ValueError("invalid provider shape"),
+                ValueError("fallback response also invalid"),
+                valid_annotation,
+            ],
         ) as annotate:
             self.assertEqual(self.run_ingest(items=[self.item, second_item]), 0)
 
-        self.assertEqual(annotate.call_count, 2)
+        self.assertEqual(annotate.call_count, 3)
         with sqlite3.connect(self.database) as connection:
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM analisis_imagen").fetchone()[0], 1)
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM prenda").fetchone()[0], 1)
@@ -519,6 +687,8 @@ class CurationPipelineTests(unittest.TestCase):
                 side_effect=[
                     app.AnnotationTimeoutError("first timeout"),
                     app.AnnotationTimeoutError("second timeout"),
+                    app.AnnotationTimeoutError("fallback first timeout"),
+                    app.AnnotationTimeoutError("fallback second timeout"),
                     valid_annotation,
                 ],
             ) as annotate,
@@ -527,13 +697,20 @@ class CurationPipelineTests(unittest.TestCase):
         ):
             self.assertEqual(self.run_ingest(items=[self.item, second_item]), 0)
 
-        self.assertEqual(annotate.call_count, 3)
+        self.assertEqual(annotate.call_count, 5)
         self.assertEqual(
             [call.args[0] for call in annotate.call_args_list],
-            [self.item["path"], self.item["path"], second_item["path"]],
+            [
+                self.item["path"],
+                self.item["path"],
+                self.item["path"],
+                self.item["path"],
+                second_item["path"],
+            ],
         )
-        randint.assert_called_once_with(30, 120)
-        wait.assert_called_once_with(73)
+        self.assertEqual(randint.call_count, 2)
+        self.assertEqual(randint.call_args_list, [unittest.mock.call(30, 120)] * 2)
+        self.assertEqual(wait.call_args_list, [unittest.mock.call(73)] * 2)
         with sqlite3.connect(self.database) as connection:
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM analisis_imagen").fetchone()[0], 1)
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM prenda_imagen").fetchone()[0], 1)
@@ -603,6 +780,21 @@ class CurationPipelineTests(unittest.TestCase):
             "oversize": 1,
         })
         self.assertEqual([item["label"] for item in items], ["camisa"])
+
+    def test_scan_unifies_camisa_and_camiseta_as_canonical_camisa(self):
+        root = self.root / "raw"
+        shirt_dir = root / "train" / "shirt"
+        tshirt_dir = root / "train" / "t-shirt"
+        shirt_dir.mkdir(parents=True)
+        tshirt_dir.mkdir(parents=True)
+        Image.new("RGB", (16, 16), (40, 80, 120)).save(shirt_dir / "shirt.png")
+        Image.new("RGB", (16, 16), (120, 80, 40)).save(tshirt_dir / "tshirt.png")
+
+        items, _ = app.scan_source(root, {
+            "class_map": {"shirt": "camisa", "t-shirt": "camiseta"}
+        })
+
+        self.assertEqual({item["category"] for item in items}, {"camisa"})
 
     def test_image_payload_preserves_bytes_and_detects_actual_format(self):
         data_url = app.image_data_url(self.image_path)
