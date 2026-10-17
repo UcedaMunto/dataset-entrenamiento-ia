@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS prenda_imagen (
     es_fotografia_real INTEGER NOT NULL DEFAULT 1
         CHECK (es_fotografia_real IN (0, 1)),
     fuente TEXT NOT NULL,
+    etiqueta_fuente TEXT,
     permiso_uso TEXT NOT NULL,
     sha256 TEXT,
     FOREIGN KEY (id_prenda) REFERENCES prenda(id_prenda) ON DELETE CASCADE
@@ -50,6 +51,37 @@ CREATE TABLE IF NOT EXISTS valor_propiedad_prenda (
     UNIQUE (id_prenda, id_propiedad, valor)
 );
 
+CREATE TABLE IF NOT EXISTS descripcion_prenda (
+    id_descripcion INTEGER PRIMARY KEY,
+    id_prenda INTEGER NOT NULL,
+    texto TEXT NOT NULL,
+    atributos_sugeridos TEXT NOT NULL DEFAULT '{}',
+    proveedor TEXT NOT NULL,
+    modelo TEXT NOT NULL,
+    estado_revision TEXT NOT NULL DEFAULT 'pendiente'
+        CHECK (estado_revision IN ('pendiente', 'aprobado', 'rechazado')),
+    fecha_creacion TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (id_prenda) REFERENCES prenda(id_prenda) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS analisis_imagen (
+    huella_analisis TEXT PRIMARY KEY,
+    sha256 TEXT NOT NULL,
+    categoria TEXT NOT NULL,
+    proveedor TEXT NOT NULL,
+    modelo TEXT NOT NULL,
+    version_prompt TEXT NOT NULL,
+    estado TEXT NOT NULL CHECK (estado IN ('aceptada', 'descartada')),
+    resultado_json TEXT NOT NULL,
+    fecha_analisis TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS pipeline_config (
+    clave TEXT PRIMARY KEY,
+    valor TEXT NOT NULL,
+    actualizado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX IF NOT EXISTS idx_prenda_split_revision
     ON prenda(split, estado_revision, apta_para_entrenamiento);
 
@@ -61,6 +93,12 @@ CREATE INDEX IF NOT EXISTS idx_valor_prenda
 
 CREATE INDEX IF NOT EXISTS idx_valor_propiedad
     ON valor_propiedad_prenda(id_propiedad);
+
+CREATE INDEX IF NOT EXISTS idx_descripcion_prenda_revision
+    ON descripcion_prenda(id_prenda, estado_revision);
+
+CREATE INDEX IF NOT EXISTS idx_analisis_imagen_hash
+    ON analisis_imagen(sha256, categoria, proveedor, modelo);
 
 INSERT OR IGNORE INTO catalogo_propiedad
     (codigo, nombre, tipo_propiedad, valores_permitidos, tipo_valor, permite_varios)

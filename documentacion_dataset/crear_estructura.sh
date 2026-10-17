@@ -35,6 +35,9 @@ schema = schema_path.read_text(encoding="utf-8")
 with sqlite3.connect(database_path) as connection:
     connection.execute("PRAGMA foreign_keys = ON")
     connection.executescript(schema)
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(prenda_imagen)")}
+    if "etiqueta_fuente" not in columns:
+        connection.execute("ALTER TABLE prenda_imagen ADD COLUMN etiqueta_fuente TEXT")
     foreign_keys_enabled = connection.execute("PRAGMA foreign_keys").fetchone()[0]
     if foreign_keys_enabled != 1:
         raise RuntimeError("No se pudieron activar las claves foráneas de SQLite.")

@@ -8,7 +8,7 @@ Módulo pequeño de visión por computadora para complementar el proyecto de Ope
 - Color o colores básicos: negro, blanco, rojo, azul, rosa, etc.
 - Estilo: casual, elegante, fiesta, verano, deportivo, etc.
 
-El MVP se ejecutará con **Docker Compose** en una laptop. No necesita Kubernetes, un servidor de base de datos, API, interfaz web ni un modelo generativo grande para entrenar. Usa SQLite local únicamente para los metadatos del dataset. La integración con el proyecto principal se deja para después.
+El entrenamiento del MVP se ejecutará con **Docker Compose** en una laptop. No necesita Kubernetes, un servidor de base de datos, una API ni una interfaz web para entrenar. Usa SQLite local únicamente para los metadatos del dataset. La integración con el proyecto principal se deja para después; la anotación opcional de datasets externos usa servicios de visión por separado.
 
 ## Decisión técnica para el MVP
 
@@ -56,12 +56,15 @@ dataset/
 
 La clase `camisa` agrupa las prendas superiores con abertura frontal y las camisetas; ambas se guardan en `superior/camisas/` y usan la misma etiqueta. Los tipos de prenda del catálogo inicial son abrigo, blusa, camisa, chaqueta, falda, pantalón, short, suéter y vestido.
 
-El esquema usa cuatro tablas:
+El esquema usa siete tablas:
 
 - `prenda`: código, ruta de categoría, split y estado de revisión; una fila por prenda.
 - `prenda_imagen`: relación de una prenda con una o más rutas relativas a `dataset/`.
 - `catalogo_propiedad`: tipos de propiedad permitidos, como `tipo_prenda`, `color`, `estilo` y atributos.
 - `valor_propiedad_prenda`: cada valor asociado a la prenda y a su propiedad. Color y estilo pueden ocupar varias filas por prenda.
+- `descripcion_prenda`: descripciones y sugerencias de IA con proveedor/modelo y revisión pendiente.
+- `analisis_imagen`: resultado cacheado por huella para reutilizar aceptaciones y descartes del proveedor sin repetir inferencias.
+- `pipeline_config`: prompt editable y configuración funcional del proceso.
 
 Así se representa `prenda X → imágenes 1, 2, 3` y `prenda X → valor → tipo de propiedad`. La [guía del dataset](./documentacion_dataset/README.md) explica el modelo, las etiquetas y el registro de prendas; [`schema.sql`](./documentacion_dataset/schema.sql) define las tablas y el catálogo inicial. El script [`crear_estructura.sh`](./documentacion_dataset/crear_estructura.sh) crea tanto las carpetas como `dataset/metadata.sqlite`. El [índice del dataset](./dataset/README.md) enlaza las guías por zona y tipo. Consulta también el [respaldo histórico V1](./README-v1.md), que no representa el plan vigente.
 
@@ -110,53 +113,39 @@ No se recomienda entrenamiento distribuido entre las laptops: añade configuraci
 
 ## Docker Compose
 
-La estructura mínima que se implementará para ejecutar el entrenamiento:
+La infraestructura inicial de entrenamiento se encuentra en [`utilidades-entrenamiento/`](./utilidades-entrenamiento/). El subproyecto [`modelo-general-destilacion/`](./utilidades-entrenamiento/modelo-general-destilacion/README.md) audita y prepara fuentes públicas con procedencia, revisión y anotación visual opcional; consulta su [`dudas.md`](./utilidades-entrenamiento/modelo-general-destilacion/dudas.md) antes de habilitar ingestión masiva.
 
 ```text
-.
+utilidades-entrenamiento/
 ├── Dockerfile
-├── compose.yaml
+├── docker-compose.yaml
+├── entrypoint.sh
 ├── train.py
 ├── predict.py
 ├── requirements.txt
-├── configs/
-│   └── default.yaml
-├── dataset/
-└── models/
+├── configs/default.yaml
+├── modelo-ia/
+└── repositorios/
 ```
 
-El contenedor montará `dataset/` y `models/` desde la laptop: las imágenes y los modelos no se guardan dentro de la imagen Docker. El script de entrenamiento leerá `dataset/metadata.sqlite`, cargará las rutas de `prenda_imagen` y formará lotes usando las etiquetas de `valor_propiedad_prenda` agrupadas por split. La configuración permitirá elegir GPU o CPU y cambiar resolución y batch, manteniendo MobileNetV3-Small como arquitectura de esta versión.
+El Compose de CPU y el servicio opcional de GPU montan `../dataset/` en solo lectura y guardan pesos/caché en `utilidades-entrenamiento/modelo-ia/`. Los clones auxiliares pueden colocarse en `utilidades-entrenamiento/repositorios/`. El entrenador lee `dataset/metadata.sqlite`, agrupa las vistas por prenda para respetar el split y mantiene MobileNetV3-Small como arquitectura del MVP.
 
-Ejemplo de reserva de **una GPU local** en `compose.yaml`:
+El servicio GPU ya está definido en `utilidades-entrenamiento/docker-compose.yaml` y reserva **una GPU local**.
 
-```yaml
-services:
-  train:
-    build: .
-    command: ["python", "train.py", "--config", "configs/default.yaml"]
-    volumes:
-      - ./dataset:/app/dataset:ro
-      - ./models:/app/models
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-```
-
-Comandos previstos una vez creados `Dockerfile`, `compose.yaml` y `train.py`:
+Comandos implementados (desde `utilidades-entrenamiento/`):
 
 ```bash
-# Comprobar que Docker ve la GPU en esta laptop
-docker compose run --rm train nvidia-smi
+# Consultar si el contenedor detecta GPU o usa CPU
+docker compose --profile gpu run --rm train-gpu status
 
-# Entrenar
+# Entrenar en GPU
+docker compose --profile gpu run --rm train-gpu
+
+# Entrenar en CPU
 docker compose run --rm train
 ```
 
-Para usar GPU dentro del contenedor, instalar Docker Engine/Compose y NVIDIA Container Toolkit compatibles con el driver del equipo. Si `nvidia-smi` no funciona dentro del contenedor, corregir primero el acceso de Docker a la GPU o ejecutar el perfil CPU. La configuración anterior es la **meta de implementación**, no un compose ejecutable hasta que existan los archivos indicados.
+Para usar GPU dentro del contenedor, instalar Docker Engine/Compose y NVIDIA Container Toolkit compatibles con el driver del equipo. Si el comando `status` no detecta CUDA, corregir primero el acceso de Docker a la GPU o ejecutar el servicio CPU. El [README de las utilidades](./utilidades-entrenamiento/README.md) documenta entrenamiento, predicción y configuración.
 
 ## Alternativas sencillas
 
@@ -186,4 +175,4 @@ No cambiar a otro modelo si una laptop no logra usar GPU: ejecutar la misma arqu
 
 ## Factibilidad y estado de la versión 2
 
-La preparación local de carpetas y metadatos es factible y queda cubierta por el script y el esquema enlazados arriba. La guía de [factibilidad, alcance y pendientes del dataset](./documentacion_dataset/README.md#factibilidad-y-alcance-del-mvp) detalla qué está listo y qué bloquea un entrenamiento completo. En particular, aún se necesitan imágenes autorizadas y anotadas, decisiones de taxonomía y los scripts de entrenamiento y Docker. Antes de entrenar, validar relaciones, rutas de imagen, etiquetas, permisos y splits.
+La preparación local de carpetas y metadatos y el esqueleto ejecutable de entrenamiento Docker están implementados. La guía de [factibilidad, alcance y pendientes del dataset](./documentacion_dataset/README.md#factibilidad-y-alcance-del-mvp) detalla lo que bloquea una evaluación útil: aún se necesitan imágenes autorizadas y anotadas en train/val, y probar compatibilidad con las GPU concretas. Antes de entrenar, validar relaciones, rutas de imagen, etiquetas, permisos y splits. El [README de utilidades](./utilidades-entrenamiento/README.md) incluye comandos reproducibles.

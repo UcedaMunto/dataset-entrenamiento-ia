@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Monitor del dataset de prendas</title>
+  <style>
+    :root { color-scheme: dark; --bg:#10151d; --panel:#1a2330; --line:#2c3949; --text:#eef3f8; --muted:#a8b5c5; --accent:#64d7b0; --warning:#ffcc76; }
+    * { box-sizing:border-box }
+    [hidden] { display:none !important }
+    body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui,sans-serif }
+    header { display:flex; justify-content:space-between; align-items:center; gap:16px; padding:22px max(20px,calc((100vw - 1180px)/2)); border-bottom:1px solid var(--line); background:#131b25 }
+    h1,h2,h3,p { margin-top:0 } h1 { font-size:22px; margin-bottom:2px } h2 { font-size:18px }
+    .sub,.muted { color:var(--muted) } main { max-width:1180px; margin:24px auto; padding:0 20px 48px }
+    .actions,.row { display:flex; gap:10px; flex-wrap:wrap; align-items:center }
+    button { color:var(--text); background:#263547; border:1px solid #40546b; border-radius:8px; padding:10px 14px; font:inherit; cursor:pointer }
+    button:hover { border-color:var(--accent) } button.primary { background:#14644f; border-color:#218c6d } button.subtle { background:transparent }
+    .grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; margin-bottom:18px }
+    .panel,.stat { border:1px solid var(--line); border-radius:12px; background:var(--panel); padding:18px }
+    .stat .label { color:var(--muted); font-size:13px } .stat strong { display:block; font-size:30px; margin:4px 0 }
+    .progress { height:9px; background:#303d4c; border-radius:10px; overflow:hidden; margin:12px 0 6px }
+    .progress span { display:block; height:100%; background:var(--accent); width:0 }
+    .type-list { display:grid; grid-template-columns:repeat(3,1fr); gap:10px }
+    .type { background:#151d27; border:1px solid var(--line); border-radius:8px; padding:10px 12px; display:flex; justify-content:space-between; gap:8px }
+    .type b { color:var(--accent) }
+    .section-head { display:flex; justify-content:space-between; align-items:center; gap:12px }
+    .cards { display:grid; gap:12px }
+    .item { display:grid; grid-template-columns:120px 1fr; gap:15px; border-top:1px solid var(--line); padding:14px 0 }
+    .item img { width:120px; height:120px; object-fit:contain; background:#0e131a; border-radius:8px }
+    .item h3 { margin-bottom:4px; font-size:16px } .pill { display:inline-block; border:1px solid var(--line); border-radius:20px; padding:2px 9px; color:var(--muted); font-size:12px; margin:2px 4px 2px 0 }
+    .props { margin:7px 0 } .empty { color:var(--muted); padding:20px 0 }
+    .job-panel { margin-bottom:18px; border-color:#218c6d } .job-grid { display:grid; grid-template-columns:2fr 1fr 1fr; gap:12px; align-items:end; margin-top:14px }
+    .job-grid label { margin:0 0 5px } .job-checks { display:grid; gap:8px; margin:14px 0 } .job-checks label { display:flex; gap:9px; align-items:flex-start; margin:0; font-weight:400 }
+    .job-checks input { width:auto; margin-top:5px } .job-console { min-height:46px; max-height:190px; margin-bottom:0 }
+    .job-state { font-weight:700 } .job-state.running { color:var(--warning) } .job-state.completed { color:var(--accent) } .job-state.failed { color:#ff9797 }
+    dialog { width:min(720px,calc(100vw - 28px)); border:1px solid #405064; border-radius:12px; background:var(--panel); color:var(--text); padding:0; box-shadow:0 18px 60px #0009 }
+    dialog::backdrop { background:#05080dcc }
+    .modal-head,.modal-body,.modal-foot { padding:16px 20px } .modal-head,.modal-foot { border-bottom:1px solid var(--line) } .modal-foot { border:0; border-top:1px solid var(--line); justify-content:flex-end }
+    .modal-head { display:flex; justify-content:space-between; align-items:center } .modal-head h2 { margin:0 }
+    label { display:block; margin:13px 0 6px; font-weight:600 }
+    textarea,input,select { width:100%; color:var(--text); background:#101720; border:1px solid #405064; border-radius:7px; padding:10px; font:inherit }
+    textarea { min-height:145px; resize:vertical } pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:220px; overflow:auto; padding:12px; border-radius:8px; background:#101720; color:#cad5e2; font:12px/1.5 ui-monospace,monospace }
+    .notice { color:var(--warning); font-size:13px } .success { color:var(--accent) } .error { color:#ff9797 }
+    @media(max-width:760px) { header { align-items:flex-start; flex-direction:column } .grid { grid-template-columns:1fr } .job-grid { grid-template-columns:1fr } .type-list { grid-template-columns:repeat(2,1fr) } }
+    @media(max-width:460px) { .item { grid-template-columns:82px 1fr; gap:10px } .item img { width:82px; height:82px } .type-list { grid-template-columns:1fr 1fr } }
+  </style>
+</head>
+<body>
+  <header>
+    <div><h1>Monitor del dataset de prendas</h1><div class="sub">Curación, análisis IA y progreso hacia 5.000 prendas</div></div>
+    <nav class="actions">
+      <button id="promptButton">Editar prompt</button>
+      <button id="propertiesButton">Propiedades IA</button>
+      <button id="keysButton">API keys</button>
+      <button id="refreshButton" class="primary">Actualizar</button>
+    </nav>
+  </header>
+  <main>
+    <section class="panel job-panel" aria-labelledby="jobTitle">
+      <div class="section-head"><div><h2 id="jobTitle">Procesar imágenes ahora</h2><span class="muted">Inicia una importación real y sigue su actividad en vivo.</span></div><span id="jobState" class="job-state">Sin iniciar</span></div>
+      <form id="ingestForm">
+        <div class="job-grid">
+          <div><label for="sourceSelect">Fuente</label><select id="sourceSelect" required></select></div>
+          <div><label for="ingestProvider">Análisis</label><select id="ingestProvider"><option value="none">Sin IA (local)</option><option value="nim">NVIDIA NIM</option><option value="deepseek">DeepSeek</option></select></div>
+          <div><label for="batchLimit">Máximo de imágenes</label><input id="batchLimit" type="number" min="1" max="1000" value="10" required></div>
+        </div>
+        <div class="job-checks">
+          <label><input id="confirmWrite" type="checkbox" required><span>Confirmo que el lote puede copiar imágenes al dataset y escribir en SQLite.</span></label>
+          <label id="remoteConsentRow" hidden><input id="confirmRemote" type="checkbox"><span>Autorizo enviar hasta el máximo indicado a una IA externa. Puede consumir cuota o generar cargos; revisé el proveedor elegido.</span></label>
+        </div>
+        <div class="row"><button id="startIngestButton" class="primary" type="submit">▶ Iniciar procesamiento</button><span id="jobMessage" role="status" class="muted">Elige una fuente y confirma antes de iniciar.</span></div>
+      </form>
+      <pre id="jobLogs" class="job-console" aria-live="polite">El registro del proceso aparecerá aquí.</pre>
+    </section>
+    <section class="grid">
+      <article class="stat"><span class="label">Prendas en el dataset</span><strong id="total">—</strong><div id="targetLabel" class="muted">Meta: 5.000</div><div class="progress"><span id="progress"></span></div><div id="progressLabel" class="muted"></div></article>
+      <article class="stat"><span class="label">Tiempo estimado a 5.000</span><strong id="eta">—</strong><div id="etaDetail" class="muted">Esperando datos de análisis</div></article>
+      <article class="stat"><span class="label">Análisis IA guardados</span><strong id="analysisCount">—</strong><div id="providerStatus" class="muted"></div></article>
+    </section>
+    <section class="panel" style="margin-bottom:18px">
+      <div class="section-head"><h2>Prendas por tipo</h2><span class="muted">Incluye pendientes y aprobadas</span></div>
+      <div class="type-list" id="typeCounts"></div>
+    </section>
+    <section class="panel">
+      <div class="section-head"><h2>Últimas 5 prendas incorporadas</h2><span class="muted">Propiedades confirmadas y sugerencias de IA</span></div>
+      <div class="cards" id="recent"></div>
+    </section>
+    <p id="status" role="status" class="muted" style="margin-top:14px"></p>
+  </main>
+
+  <dialog id="promptModal">
+    <form id="promptForm">
+      <div class="modal-head"><h2>Prompt para la IA</h2><button type="button" class="subtle close" aria-label="Cerrar">Cerrar</button></div>
+      <div class="modal-body">
+        <p class="muted">Edita las instrucciones. La clase y vocabularios se adjuntan automáticamente en TOON; la salida debe conservar el JSON requerido para validarla. Cambiar el prompt crea una nueva huella y no reutiliza análisis anteriores.</p>
+        <label for="promptText">Instrucciones editables</label><textarea id="promptText" maxlength="20000" required></textarea>
+        <label>Vista previa del mensaje enviado (ejemplo: camisa)</label><pre id="promptPreview"></pre>
+        <div id="promptStatus" role="status"></div>
+      </div>
+      <div class="modal-foot actions"><button type="button" class="close">Cancelar</button><button class="primary" type="submit">Guardar prompt</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="propertiesModal">
+    <form id="propertiesForm">
+      <div class="modal-head"><h2>Propiedades que propone la IA</h2><button type="button" class="subtle close" aria-label="Cerrar">Cerrar</button></div>
+      <div class="modal-body">
+        <p class="muted">Define vocabularios separados por línea. Solo esos valores se aceptan como sugerencias de color y estilo.</p>
+        <label for="colorsText">Colores</label><textarea id="colorsText" required></textarea>
+        <label for="stylesText">Estilos</label><textarea id="stylesText" required></textarea>
+        <div id="propertiesStatus" role="status"></div>
+      </div>
+      <div class="modal-foot actions"><button type="button" class="close">Cancelar</button><button class="primary" type="submit">Guardar propiedades</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="keysModal">
+    <form id="keysForm">
+      <div class="modal-head"><h2>Configuración de proveedores</h2><button type="button" class="subtle close" aria-label="Cerrar">Cerrar</button></div>
+      <div class="modal-body">
+        <p class="notice">Las claves nunca se muestran de vuelta. Deja un campo vacío para conservar la clave actual. El archivo local .env se mantiene fuera de Git.</p>
+        <label for="providerSelect">Proveedor para nuevas ejecuciones</label>
+        <select id="providerSelect"><option value="nim">NVIDIA NIM</option><option value="deepseek">DeepSeek</option><option value="openai">OpenAI (para después)</option><option value="none">No usar API</option></select>
+        <div id="keyStatus" class="muted"></div>
+        <label for="nimKey">Reemplazar NVIDIA NIM API key</label><input id="nimKey" type="password" autocomplete="new-password">
+        <label for="deepseekKey">Reemplazar DeepSeek API key</label><input id="deepseekKey" type="password" autocomplete="new-password">
+        <label for="openaiKey">Reemplazar OpenAI API key</label><input id="openaiKey" type="password" autocomplete="new-password">
+        <div id="keysStatus" role="status"></div>
+      </div>
+      <div class="modal-foot actions"><button type="button" class="close">Cancelar</button><button class="primary" type="submit">Guardar configuración</button></div>
+    </form>
+  </dialog>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let latestData = null;
+    let providerInitialized = false;
+    const categoryNames = {
+      abrigo:"Abrigo", blusa:"Blusa", camisa:"Camisa", chaqueta:"Chaqueta",
+      falda:"Falda", pantalon:"Pantalón", short:"Short", sueter:"Suéter", vestido:"Vestido"
+    };
+    const providerNames = { nim:"NVIDIA NIM", deepseek:"DeepSeek", openai:"OpenAI", none:"Sin IA" };
+    async function request(path, options={}) {
+      const response = await fetch(path, {cache:"no-store", ...options});
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || `Error HTTP ${response.status}`);
+      return data;
+    }
+    function setStatus(id, message, kind="muted") {
+      const node=$(id); node.textContent=message; node.className=kind;
+    }
+    function formatDuration(seconds) {
+      if (seconds === null || seconds === undefined) return "Sin datos";
+      if (seconds <= 0) return "Meta alcanzada";
+      const days=Math.floor(seconds/86400), hours=Math.floor((seconds%86400)/3600), minutes=Math.floor((seconds%3600)/60);
+      if (days > 0) return `${days} d ${hours} h`;
+      if (hours > 0) return `${hours} h ${minutes} min`;
+      return `${Math.max(minutes,1)} min`;
+    }
+    function renderRecent(items) {
+      const root=$("recent"); root.replaceChildren();
+      if (!items.length) { const empty=document.createElement("p"); empty.className="empty"; empty.textContent="Todavía no hay prendas importadas."; root.append(empty); return; }
+      for (const item of items) {
+        const card=document.createElement("article"); card.className="item";
+        const image=document.createElement("img"); image.src=item.imagen_url; image.alt=item.codigo; image.loading="lazy"; card.append(image);
+        const body=document.createElement("div");
+        const typeValue=item.propiedades.find(property=>property.propiedad==="tipo_prenda")?.valor;
+        const title=document.createElement("h3"); title.textContent=`${item.codigo} · ${categoryNames[typeValue] || item.etiqueta_fuente || item.ruta_categoria}`; body.append(title);
+        const meta=document.createElement("div"); meta.className="muted"; meta.textContent=`${item.fecha} · split ${item.split || "sin asignar"} · ${item.estado_revision} · fuente ${item.fuente}`; body.append(meta);
+        if (item.descripcion) { const desc=document.createElement("p"); desc.textContent=item.descripcion; desc.style.margin="8px 0"; body.append(desc); }
+        const pills=document.createElement("div"); pills.className="props";
+        for (const property of item.propiedades) { const pill=document.createElement("span"); pill.className="pill"; pill.textContent=`${property.propiedad}: ${property.valor}`; pills.append(pill); }
+        for (const [key,values] of Object.entries(item.sugerencias_ia || {})) for (const value of values) { const pill=document.createElement("span"); pill.className="pill"; pill.textContent=`IA ${key}: ${value}`; pills.append(pill); }
+        if (item.proveedor) { const ai=document.createElement("span"); ai.className="pill"; ai.textContent=`IA: ${providerNames[item.proveedor] || item.proveedor} · ${item.modelo || ""}`; pills.append(ai); }
+        body.append(pills); card.append(body); root.append(card);
+      }
+    }
+    function render(data) {
+      latestData=data;
+      const sourceSelect=$("sourceSelect"), previousSource=sourceSelect.value;
+      sourceSelect.replaceChildren();
+      for (const source of data.sources) { const option=document.createElement("option"); option.value=source.id; option.textContent=source.label; sourceSelect.append(option); }
+      if (data.sources.some(source=>source.id===previousSource)) sourceSelect.value=previousSource;
+      const providerSelect=$("ingestProvider");
+      for (const option of providerSelect.options) option.disabled=option.value!=="none" && !data.providers[option.value];
+      if (providerSelect.value!=="none" && !data.providers[providerSelect.value]) providerSelect.value="none";
+      if (!providerInitialized) {
+        if (["nim","deepseek"].includes(data.selected_provider) && data.providers[data.selected_provider]) providerSelect.value=data.selected_provider;
+        providerInitialized=true;
+      }
+      syncRemoteConsent();
+      $("total").textContent=data.total.toLocaleString("es-MX");
+      $("targetLabel").textContent=`Meta: ${data.target.toLocaleString("es-MX")}`;
+      const pct=Math.min(100,data.total/data.target*100);
+      $("progress").style.width=`${pct}%`;
+      $("progressLabel").textContent=`${pct.toFixed(1)}% · faltan ${Math.max(data.target-data.total,0).toLocaleString("es-MX")}`;
+      $("eta").textContent=formatDuration(data.estimate.seconds);
+      $("etaDetail").textContent=data.estimate.seconds === null ? data.estimate.message : `${data.estimate.rate_per_hour} prendas estimadas por hora · ${data.estimate.message}`;
+      $("analysisCount").textContent=data.analysis_count.toLocaleString("es-MX");
+      const configured=Object.entries(data.providers).filter(([,value])=>value).map(([name])=>providerNames[name]);
+      $("providerStatus").textContent=`Activo para nuevas ejecuciones: ${providerNames[data.selected_provider] || data.selected_provider}. Claves configuradas: ${configured.join(", ") || "ninguna"}.`;
+      const list=$("typeCounts"); list.replaceChildren();
+      for (const [code,name] of Object.entries(categoryNames)) { const row=document.createElement("div"); row.className="type"; const label=document.createElement("span"); label.textContent=name; const count=document.createElement("b"); count.textContent=(data.counts_by_type[code]||0).toLocaleString("es-MX"); row.append(label,count); list.append(row); }
+      renderRecent(data.recent_images);
+    }
+    async function refresh() { try { render(await request("/api/overview")); setStatus("status",`Actualizado ${new Date().toLocaleTimeString("es-MX")}`); } catch(error) { setStatus("status",error.message,"error"); } }
+    function renderJob(job) {
+      const stateNames={idle:"Sin iniciar",running:"En curso",completed:"Finalizado",failed:"Error"};
+      $("jobState").textContent=stateNames[job.status] || job.status;
+      $("jobState").className=`job-state ${job.status}`;
+      $("jobMessage").textContent=job.message;
+      $("jobMessage").className=job.status==="failed"?"error":job.status==="completed"?"success":"muted";
+      $("startIngestButton").disabled=job.status==="running";
+      $("startIngestButton").textContent=job.status==="running"?"Procesamiento en curso…":"▶ Iniciar procesamiento";
+      const logText=(job.logs || []).join("\n");
+      $("jobLogs").textContent=logText || (job.status==="running"?"Esperando salida del proceso…":"El registro del proceso aparecerá aquí.");
+      $("jobLogs").scrollTop=$("jobLogs").scrollHeight;
+    }
+    async function refreshJob() {
+      try {
+        const job=await request("/api/job");
+        const wasRunning=$("jobState").classList.contains("running");
+        renderJob(job);
+        if (wasRunning && job.status!=="running") await refresh();
+      } catch(error) { setStatus("jobMessage",error.message,"error"); }
+    }
+    function syncRemoteConsent() {
+      const remote=$("ingestProvider").value!=="none";
+      $("remoteConsentRow").hidden=!remote;
+      $("confirmRemote").required=remote;
+      if(!remote) $("confirmRemote").checked=false;
+    }
+    function openDialog(id) { $(id).showModal(); }
+    function closeDialogs() { document.querySelectorAll("dialog").forEach(dialog=>dialog.close()); }
+    document.querySelectorAll(".close").forEach(button=>button.addEventListener("click",closeDialogs));
+    $("refreshButton").addEventListener("click",refresh);
+    $("ingestProvider").addEventListener("change",syncRemoteConsent);
+    $("ingestForm").addEventListener("submit",async(event)=>{
+      event.preventDefault();
+      const button=$("startIngestButton"); button.disabled=true;
+      try {
+        const job=await request("/api/ingest",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
+          source:$("sourceSelect").value,provider:$("ingestProvider").value,
+          limit:Number($("batchLimit").value),confirm_write:$("confirmWrite").checked,
+          confirm_remote:$("confirmRemote").checked
+        })});
+        renderJob(job);
+        $("confirmWrite").checked=false; $("confirmRemote").checked=false;
+      } catch(error) { setStatus("jobMessage",error.message,"error"); button.disabled=false; }
+    });
+    $("promptButton").addEventListener("click",async()=>{ try { latestData=await request("/api/overview"); $("promptText").value=latestData.prompt_instructions; $("promptPreview").textContent=latestData.prompt_preview; setStatus("promptStatus",""); openDialog("promptModal"); } catch(e) { setStatus("status",e.message,"error"); } });
+    $("promptText").addEventListener("input",()=>{ if(latestData) { const marker="\n\nInstrucciones:\n"; const start=latestData.prompt_preview.indexOf(marker); const end=latestData.prompt_preview.indexOf("\n\nDevuelve solo JSON",start); $("promptPreview").textContent=`${latestData.prompt_preview.slice(0,start)}${marker}${$("promptText").value}${latestData.prompt_preview.slice(end)}`; } });
+    $("promptForm").addEventListener("submit",async(event)=>{ event.preventDefault(); try { await request("/api/prompt",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({instructions:$("promptText").value})}); setStatus("promptStatus","Prompt guardado.","success"); await refresh(); } catch(e) { setStatus("promptStatus",e.message,"error"); } });
+    $("propertiesButton").addEventListener("click",async()=>{ try { latestData=await request("/api/overview"); $("colorsText").value=latestData.properties.color.join("\n"); $("stylesText").value=latestData.properties.estilo.join("\n"); setStatus("propertiesStatus",""); openDialog("propertiesModal"); } catch(e) { setStatus("status",e.message,"error"); } });
+    const lines=(value)=>value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+    $("propertiesForm").addEventListener("submit",async(event)=>{ event.preventDefault(); try { await request("/api/properties",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({color:lines($("colorsText").value),estilo:lines($("stylesText").value)})}); setStatus("propertiesStatus","Vocabularios guardados.","success"); await refresh(); } catch(e) { setStatus("propertiesStatus",e.message,"error"); } });
+    $("keysButton").addEventListener("click",async()=>{ try { latestData=await request("/api/overview"); $("providerSelect").value=latestData.selected_provider; $("keyStatus").textContent=Object.entries(latestData.providers).map(([name,configured])=>`${providerNames[name]}: ${configured?"configurada":"sin configurar"}`).join(" · "); $("nimKey").value=""; $("deepseekKey").value=""; $("openaiKey").value=""; setStatus("keysStatus",""); openDialog("keysModal"); } catch(e) { setStatus("status",e.message,"error"); } });
+    $("keysForm").addEventListener("submit",async(event)=>{ event.preventDefault(); const payload={provider:$("providerSelect").value,NVIDIA_NIM_API_KEY:$("nimKey").value,DEEPSEEK_API_KEY:$("deepseekKey").value,OPENAI_API_KEY:$("openaiKey").value}; try { await request("/api/credentials",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}); $("nimKey").value=""; $("deepseekKey").value=""; $("openaiKey").value=""; setStatus("keysStatus","Configuración guardada; las claves no se mostrarán nuevamente.","success"); await refresh(); } catch(e) { setStatus("keysStatus",e.message,"error"); } });
+    syncRemoteConsent();
+    refresh(); refreshJob(); setInterval(refresh,5000); setInterval(refreshJob,2000);
+  </script>
+</body>
+</html>

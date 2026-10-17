@@ -5,8 +5,8 @@ Las imágenes se organizan por zona del cuerpo y tipo de prenda. Las etiquetas, 
 Consulta la [documentación del dataset](../documentacion_dataset/README.md) para:
 
 - Crear las carpetas y `metadata.sqlite` con [`crear_estructura.sh`](../documentacion_dataset/crear_estructura.sh).
-- Consultar las cuatro tablas y las etiquetas iniciales en [`schema.sql`](../documentacion_dataset/schema.sql).
-- Registrar prendas, imágenes y propiedades en las cuatro tablas SQLite.
+- Consultar las siete tablas y las etiquetas iniciales en [`schema.sql`](../documentacion_dataset/schema.sql).
+- Registrar prendas, imágenes, propiedades y descripciones revisables en SQLite.
 - Preparar los datos para entrenar MobileNetV3-Small.
 
 Guías de clasificación por zona: [superior](./superior/README.md), [inferior](./inferior/README.md) e [inferior_superior](./inferior_superior/README.md). Cada tipo también tiene una guía dentro de su propia carpeta.

@@ -1,0 +1,13 @@
+dataset_root: /app/dataset
+database: /app/dataset/metadata.sqlite
+model_dir: /app/modelo-ia/runs
+
+image_size: 160
+batch_size: 2
+epochs: 15
+learning_rate: 0.001
+num_workers: 0
+pretrained: true
+unfreeze_last_block: false
+seed: 42
+multilabel_threshold: 0.5

@@ -1,0 +1,11 @@
+# Salidas del entrenamiento y pesos preentrenados descargados por torchvision.
+/modelo-ia/*
+!/modelo-ia/.gitkeep
+
+# Repositorios auxiliares clonados localmente; conserva solo el marcador.
+/repositorios/*
+!/repositorios/.gitkeep
+
+__pycache__/
+*.py[cod]
+.pytest_cache/

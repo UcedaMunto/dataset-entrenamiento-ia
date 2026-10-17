@@ -1,0 +1,64 @@
+{
+  "clothing-small": {
+    "path": "clothing-dataset-small-master",
+    "license": "CC0-1.0 (README y LICENSE del repositorio; usuario confirma permiso de uso comercial)",
+    "allow_import": true,
+    "photograph": true,
+    "class_map": {
+      "dress": "vestido",
+      "pants": "pantalon",
+      "shirt": "camisa",
+      "shorts": "short",
+      "skirt": "falda",
+      "t-shirt": "camisa"
+    }
+  },
+  "clothing-full": {
+    "path": "clothing-dataset-master",
+    "labels_csv": "images.csv",
+    "image_dir": "images",
+    "license": "CC0-1.0 (README y LICENSE del repositorio; usuario confirma permiso de uso comercial)",
+    "allow_import": true,
+    "photograph": true,
+    "class_map": {
+      "blouse": "blusa",
+      "blazer": "chaqueta",
+      "dress": "vestido",
+      "pants": "pantalon",
+      "polo": "camisa",
+      "shirt": "camisa",
+      "shorts": "short",
+      "skirt": "falda",
+      "t-shirt": "camisa",
+      "undershirt": "camisa"
+    }
+  },
+  "mendeley-aig": {
+    "path": "AIG-Dataset",
+    "license": "Uso comercial libre confirmado por el usuario; AIG-Dataset no incluye README ni LICENSE en la carpeta local",
+    "allow_import": true,
+    "photograph": true,
+    "class_map": {
+      "blouses": "blusa",
+      "coats": "abrigo",
+      "dresses": "vestido",
+      "jackets-vests": "chaqueta",
+      "jeans": "pantalon",
+      "pants": "pantalon",
+      "shirts": "camisa",
+      "shorts": "short",
+      "skirts": "falda",
+      "sweaters": "sueter",
+      "trousers": "pantalon",
+      "t-shirts": "camisa"
+    }
+  },
+  "fashion-mnist": {
+    "path": "fashion-mnist",
+    "license": "MIT del repositorio; derechos/licencia de los datos deben confirmarse por separado",
+    "allow_import": false,
+    "photograph": false,
+    "benchmark_only": true,
+    "class_map": {}
+  }
+}

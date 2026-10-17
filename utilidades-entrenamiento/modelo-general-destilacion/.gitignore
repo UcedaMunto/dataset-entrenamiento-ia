@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+
+# Datasets originales y material descargado.
+/datos-crudos/*
+!/datos-crudos/.gitkeep
+
+# Exports e informes locales.
+/salida/
+__pycache__/
+*.py[cod]

@@ -1,0 +1,30 @@
+x-training: &training
+  image: modelo-reconocimiento-entrenamiento:local
+  build:
+    context: .
+    dockerfile: Dockerfile
+    network: none
+  init: true
+  user: "${TRAINING_UID:-1000}:${TRAINING_GID:-1000}"
+  volumes:
+    - ../dataset:/app/dataset:ro
+    - ./modelo-ia:/app/modelo-ia
+  environment:
+    TORCH_HOME: /app/modelo-ia/cache
+    PYTHONUNBUFFERED: "1"
+  command: ["train", "--config", "/app/configs/default.yaml"]
+
+services:
+  train:
+    <<: *training
+
+  train-gpu:
+    <<: *training
+    profiles: ["gpu"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

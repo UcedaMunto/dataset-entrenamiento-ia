@@ -1,0 +1,47 @@
+services:
+  curator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      network: host
+    network_mode: host
+    init: true
+    user: "${TRAINING_UID:-1000}:${TRAINING_GID:-1000}"
+    working_dir: /app
+    environment:
+      DATASET_ROOT: /app/dataset
+      ANNOTATION_PROVIDER: ${ANNOTATION_PROVIDER:-none}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      NVIDIA_NIM_API_KEY: ${NVIDIA_NIM_API_KEY:-}
+      NVIDIA_NIM_BASE_URL: ${NVIDIA_NIM_BASE_URL:-https://integrate.api.nvidia.com/v1}
+      NVIDIA_NIM_MODEL: ${NVIDIA_NIM_MODEL:-nvidia/llama-3.2-11b-vision-instruct}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-flash}
+    volumes:
+      - ./datos-crudos:/app/datos-crudos:ro
+      - ../../dataset:/app/dataset
+      - ../../documentacion_dataset/schema.sql:/app/schema.sql:ro
+    command: ["audit", "--source", "all"]
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      network: host
+    network_mode: host
+    init: true
+    user: "${TRAINING_UID:-1000}:${TRAINING_GID:-1000}"
+    working_dir: /app
+    environment:
+      DATASET_ROOT: /app/dataset
+      DASHBOARD_HOST: 127.0.0.1
+      DASHBOARD_PORT: 8787
+    volumes:
+      - ./datos-crudos:/app/datos-crudos:ro
+      - ../../dataset:/app/dataset
+      - ../../documentacion_dataset/schema.sql:/app/schema.sql:ro
+      - ./.env:/app/.env
+    entrypoint: ["python", "/app/dashboard.py"]

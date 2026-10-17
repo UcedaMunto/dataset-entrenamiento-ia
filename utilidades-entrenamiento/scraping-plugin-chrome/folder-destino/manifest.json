@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Descargar imagen de producto",
+  "version": "1.0.0",
+  "description": "Descarga con un clic la imagen de producto más relevante de la pestaña activa.",
+  "minimum_chrome_version": "116",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "downloads"
+  ],
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "action": {
+    "default_title": "Descargar imagen de producto"
+  }
+}
