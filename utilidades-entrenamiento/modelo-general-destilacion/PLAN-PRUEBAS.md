@@ -57,11 +57,17 @@ Antes de ejecutar, verificar que el `.env` local contiene la clave del proveedor
 
 Repetir exactamente el comando. El resultado esperado es “análisis reutilizados: 1” (si fue descartado) o “duplicadas omitidas: 1” (si fue aceptado); en ninguno de los casos debe emitirse una segunda llamada al proveedor. Para comprobarlo, contrastar los contadores de uso del proveedor, no registrar ni exponer la clave.
 
+El curador aplica una separación mínima de 3 segundos entre inicios de peticiones NVIDIA NIM. La [documentación oficial](https://docs.api.nvidia.com/nim/reference/llm-apis) confirma el endpoint de chat, pero no publica un RPS universal aplicable a todas las cuentas; un timeout de lectura no prueba por sí solo una respuesta 429 ni un límite de tasa.
+
 ## 6. Fallos y recuperación
 
 - Con key/endpoint inválidos, la ejecución debe exponer el error; no marcar una respuesta fallida como procesada.
 - Si la llamada API funciona pero falla la escritura de una imagen aceptada, el resultado del análisis permanece cacheado para reintentar la importación sin volver a pagar la inferencia.
-- Una respuesta inválida no genera análisis cacheado.
+- Una respuesta inválida no genera análisis cacheado; la imagen se omite y el proceso prueba las siguientes del lote.
+- Para NVIDIA NIM la solicitud usa modo JSON y 512 tokens; una respuesta truncada debe reportar `finish_reason`/longitud sin guardar una decisión incompleta.
+- Dos inicios consecutivos de solicitudes NIM se separan como mínimo 3 segundos. Ante timeout, el proceso espera un intervalo aleatorio entre 30 y 120 segundos y reintenta la misma imagen exactamente una vez; si el segundo intento también expira, la omite y pasa a la siguiente muestra. Verificar orden de imágenes, espera y que solo se persista una decisión válida.
+- Con hashes ya importados al inicio del inventario, un límite de lote pequeño debe saltarlos antes de contar candidatos; el mismo tamaño de lote debe avanzar hasta llenar el cupo con imágenes nuevas. El resumen debe reportar las duplicadas omitidas antes de IA.
+- `motivo_descarte: null` se normaliza a cadena vacía solo para imágenes aceptadas; otros tipos inválidos se omiten sin frenar el lote.
 - La prueba de rollback/importación se hace solo en dataset temporal; nunca simular fallos destructivos contra `dataset/metadata.sqlite`.
 
 ## 7. Panel de monitoreo
@@ -83,6 +89,7 @@ Comprobar:
 - Solicitudes POST con host/origen ajeno son rechazadas; las claves no existen en SQLite.
 - El servicio está publicado en `127.0.0.1`, no en `0.0.0.0` del host.
 - La tarjeta **Procesar imágenes ahora** ofrece solo fuentes importables, inicia lotes de 1–1.000 imágenes y muestra estado/salida mientras refresca los conteos.
+- **Detener envío** solicita la cancelación al proceso hijo; el estado pasa a “detención solicitada” y luego “detenido”. Una solicitud ya activa puede finalizar/importarse, pero no se inicia otra. Si se detiene durante el backoff de timeout, no se reintenta ni se avanza a otra imagen.
 - Sin IA exige confirmación de escritura; NIM/DeepSeek además requieren clave configurada y autorización explícita de envío remoto. OpenAI permanece fuera de la selección hasta habilitarlo por separado.
 - Un segundo lote se rechaza mientras el anterior siga activo; errores y claves deben estar ausentes de cualquier registro mostrado.
 

@@ -3,6 +3,7 @@ import json
 import os
 import re
 import sqlite3
+import signal
 import subprocess
 import sys
 import tempfile
@@ -30,6 +31,7 @@ PROVIDERS = {
     "deepseek": "DEEPSEEK_API_KEY",
 }
 JOB_LOCK = threading.Lock()
+JOB_PROCESS: subprocess.Popen | None = None
 JOB_STATE = {
     "status": "idle",
     "source": None,
@@ -38,6 +40,7 @@ JOB_STATE = {
     "started_at": None,
     "finished_at": None,
     "exit_code": None,
+    "cancellation_requested": False,
     "message": "Todavía no se ha iniciado un procesamiento.",
     "logs": [],
 }
@@ -86,6 +89,8 @@ def _append_job_log(line: str, secrets: list[str]) -> None:
 
 
 def _run_ingest(command: list[str], environment: dict[str, str], secrets: list[str]) -> None:
+    global JOB_PROCESS
+    process = None
     try:
         process = subprocess.Popen(
             command,
@@ -98,6 +103,14 @@ def _run_ingest(command: list[str], environment: dict[str, str], secrets: list[s
             errors="replace",
             bufsize=1,
         )
+        with JOB_LOCK:
+            JOB_PROCESS = process
+            cancel_now = JOB_STATE["cancellation_requested"]
+            if cancel_now:
+                try:
+                    process.send_signal(signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
         with process:
             if process.stdout is None:
                 raise RuntimeError("No se pudo abrir la salida del proceso de curación.")
@@ -106,19 +119,54 @@ def _run_ingest(command: list[str], environment: dict[str, str], secrets: list[s
             exit_code = process.wait()
         finished = datetime.now().astimezone().isoformat(timespec="seconds")
         with JOB_LOCK:
-            JOB_STATE["status"] = "completed" if exit_code == 0 else "failed"
+            cancelled = JOB_STATE["cancellation_requested"]
+            JOB_STATE["status"] = (
+                "cancelled" if cancelled else "completed" if exit_code == 0 else "failed"
+            )
             JOB_STATE["finished_at"] = finished
             JOB_STATE["exit_code"] = exit_code
-            JOB_STATE["message"] = (
-                "Procesamiento finalizado correctamente."
-                if exit_code == 0
-                else f"El procesamiento terminó con error (código {exit_code}). Revisa el registro."
-            )
+            if cancelled:
+                JOB_STATE["message"] = "Procesamiento detenido de forma segura."
+            elif exit_code == 0:
+                JOB_STATE["message"] = "Procesamiento finalizado correctamente."
+            else:
+                JOB_STATE["message"] = (
+                    f"El procesamiento terminó con error (código {exit_code}). Revisa el registro."
+                )
     except (OSError, RuntimeError, subprocess.SubprocessError) as error:
         with JOB_LOCK:
             JOB_STATE["status"] = "failed"
             JOB_STATE["finished_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
             JOB_STATE["message"] = f"No se pudo ejecutar el procesamiento: {error}"
+    finally:
+        with JOB_LOCK:
+            if JOB_PROCESS is process:
+                JOB_PROCESS = None
+
+
+def stop_ingest() -> dict:
+    global JOB_PROCESS
+    with JOB_LOCK:
+        if JOB_STATE["status"] != "running":
+            raise ValueError("No hay un procesamiento activo para detener.")
+        if JOB_STATE["cancellation_requested"]:
+            return {**JOB_STATE, "logs": list(JOB_STATE["logs"])}
+
+        JOB_STATE["cancellation_requested"] = True
+        JOB_STATE["message"] = (
+            "Detención solicitada; se espera a que termine la petición de IA actual."
+        )
+        process = JOB_PROCESS
+        if process is not None:
+            try:
+                process.send_signal(signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            except OSError as error:
+                JOB_STATE["cancellation_requested"] = False
+                JOB_STATE["message"] = f"No se pudo solicitar la detención: {error}"
+                raise RuntimeError(JOB_STATE["message"]) from error
+        return {**JOB_STATE, "logs": list(JOB_STATE["logs"])}
 
 
 def start_ingest(payload: dict) -> dict:
@@ -135,6 +183,7 @@ def start_ingest(payload: dict) -> dict:
             "started_at": started,
             "finished_at": None,
             "exit_code": None,
+            "cancellation_requested": False,
             "message": "Procesamiento iniciado; esperando actividad.",
             "logs": [],
         })
@@ -522,6 +571,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send_json(200, {"saved": True})
             elif path == "/api/ingest":
                 self._send_json(202, start_ingest(payload))
+            elif path == "/api/stop":
+                self._send_json(202, stop_ingest())
             else:
                 self._send_json(404, {"error": "Ruta no encontrada."})
         except (OSError, sqlite3.Error, ValueError, KeyError) as error:

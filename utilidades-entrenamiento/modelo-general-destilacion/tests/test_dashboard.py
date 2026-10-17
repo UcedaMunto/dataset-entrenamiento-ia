@@ -3,6 +3,8 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from email.message import Message
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
 
@@ -156,6 +158,7 @@ class DashboardTests(unittest.TestCase):
             "started_at": None,
             "finished_at": None,
             "exit_code": None,
+            "cancellation_requested": False,
             "message": "",
             "logs": [],
         }
@@ -181,6 +184,51 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("do-not-return-this-secret", secrets)
         self.assertEqual(result["status"], "running")
         worker.start.assert_called_once()
+
+    def test_stop_ingest_sends_cooperative_signal_to_running_process(self):
+        state = {
+            "status": "running",
+            "cancellation_requested": False,
+            "message": "",
+            "logs": [],
+        }
+        process = unittest.mock.Mock()
+        process.pid = 42
+        with patch.object(dashboard, "JOB_STATE", state), patch.object(
+            dashboard, "JOB_PROCESS", process
+        ):
+            result = dashboard.stop_ingest()
+
+        process.send_signal.assert_called_once_with(dashboard.signal.SIGTERM)
+        self.assertTrue(result["cancellation_requested"])
+        self.assertIn("Detención solicitada", result["message"])
+
+    def test_stop_ingest_is_remembered_if_child_is_not_started_yet(self):
+        state = {
+            "status": "running",
+            "cancellation_requested": False,
+            "message": "",
+            "logs": [],
+        }
+        with patch.object(dashboard, "JOB_STATE", state), patch.object(
+            dashboard, "JOB_PROCESS", None
+        ):
+            result = dashboard.stop_ingest()
+        self.assertTrue(result["cancellation_requested"])
+
+    def test_stop_endpoint_calls_cooperative_stop(self):
+        handler = object.__new__(dashboard.DashboardHandler)
+        handler.headers = Message()
+        handler.headers["Host"] = "127.0.0.1:8787"
+        handler.headers["Origin"] = "http://127.0.0.1:8787"
+        handler.headers["Content-Type"] = "application/json"
+        handler.headers["Content-Length"] = "2"
+        handler.rfile = BytesIO(b"{}")
+        handler.path = "/api/stop"
+        handler._send_json = unittest.mock.Mock()
+        with patch.object(dashboard, "stop_ingest", return_value={"status": "running"}):
+            dashboard.DashboardHandler.do_POST(handler)
+        handler._send_json.assert_called_once_with(202, {"status": "running"})
 
     def test_job_logs_redact_provider_keys(self):
         state = {"logs": []}

@@ -5,10 +5,14 @@ import csv
 import hashlib
 import json
 import os
+import random
 import re
+import signal
 import shutil
 import sqlite3
 import sys
+import threading
+import time
 import unicodedata
 from pathlib import Path
 
@@ -21,6 +25,12 @@ SOURCE_CONFIG = ROOT / "sources.json"
 IMAGE_EXTENSIONS = {".avif", ".bmp", ".gif", ".jpeg", ".jpg", ".png", ".webp"}
 REMOTE_IMAGE_EXTENSIONS = {".gif", ".jpeg", ".jpg", ".png", ".webp"}
 MAX_IMAGE_BYTES = 200_000
+NIM_MIN_REQUEST_INTERVAL_SECONDS = 3
+NIM_TIMEOUT_RETRY_MIN_SECONDS = 30
+NIM_TIMEOUT_RETRY_MAX_SECONDS = 120
+_nim_request_lock = threading.Lock()
+_last_nim_request_at: float | None = None
+CANCEL_REQUESTED = threading.Event()
 ANALYSIS_PROMPT_VERSION = "1"
 DEFAULT_PROMPT_INSTRUCTIONS = (
     "Determina si la imagen muestra claramente una sola prenda de la clase indicada. "
@@ -42,7 +52,7 @@ PROVIDER_DEFAULTS = {
     "openai": ("OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL",
                "https://api.openai.com/v1", "gpt-4o-mini"),
     "nim": ("NVIDIA_NIM_API_KEY", "NVIDIA_NIM_BASE_URL", "NVIDIA_NIM_MODEL",
-            "https://integrate.api.nvidia.com/v1", "nvidia/llama-3.2-11b-vision-instruct"),
+            "https://integrate.api.nvidia.com/v1", "meta/llama-3.2-11b-vision-instruct"),
     "deepseek": ("DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL", "DEEPSEEK_MODEL",
                  "https://api.deepseek.com", "deepseek-flash"),
 }
@@ -57,6 +67,22 @@ CATEGORY_PATHS = {
     "sueter": "superior/sueteres",
     "vestido": "inferior_superior/vestido",
 }
+
+
+class AnnotationTimeoutError(RuntimeError):
+    pass
+
+
+class ProcessingCancelled(RuntimeError):
+    pass
+
+
+def request_processing_cancel(signum, frame) -> None:
+    CANCEL_REQUESTED.set()
+
+
+def install_cancellation_handler() -> None:
+    signal.signal(signal.SIGTERM, request_processing_cancel)
 
 
 def normalize(value: str) -> str:
@@ -351,10 +377,12 @@ def build_prompt(instructions: str, known_type: str, colors: list[str], styles: 
         f"estilos[{len(styles)}]: {', '.join(json.dumps(value, ensure_ascii=False) for value in styles)}\n\n"
         "Instrucciones:\n"
         f"{instructions.strip()}\n\n"
-        "Devuelve solo JSON con apta (booleano), motivo_descarte (texto), "
-        "descripcion (texto), colores (lista) y estilos (lista). La descripcion "
-        "debe ser texto breve. Colores y estilos solo pueden usar los valores de "
-        "los vocabularios TOON. Si apta es false, incluye un motivo breve."
+        "Devuelve únicamente un objeto JSON completo, sin Markdown ni texto adicional, "
+        "con estas claves: apta (booleano), motivo_descarte (texto), descripcion "
+        "(texto de una sola frase breve), colores (lista) y estilos (lista). Mantén "
+        "motivo_descarte como cadena vacía cuando la imagen sea apta; nunca uses null. "
+        "Mantén la respuesta concisa. Colores y estilos solo pueden usar los valores de los "
+        "vocabularios TOON. Si apta es false, incluye un motivo breve."
     )
 
 
@@ -399,6 +427,18 @@ def parse_model_json(content: str) -> dict:
     return result
 
 
+def wait_for_nim_request_slot() -> None:
+    global _last_nim_request_at
+    with _nim_request_lock:
+        now = time.monotonic()
+        if _last_nim_request_at is not None:
+            remaining = NIM_MIN_REQUEST_INTERVAL_SECONDS - (now - _last_nim_request_at)
+            if remaining > 0:
+                time.sleep(remaining)
+                now = time.monotonic()
+        _last_nim_request_at = now
+
+
 def annotate_image(
     path: Path,
     known_type: str,
@@ -414,7 +454,7 @@ def annotate_image(
     payload = {
         "model": model,
         "temperature": 0,
-        "max_tokens": 350,
+        "max_tokens": 512,
         "messages": [{
             "role": "user",
             "content": [
@@ -423,6 +463,11 @@ def annotate_image(
             ],
         }],
     }
+    if provider == "nim":
+        payload["response_format"] = {"type": "json_object"}
+        wait_for_nim_request_slot()
+    if CANCEL_REQUESTED.is_set():
+        raise ProcessingCancelled("Detención solicitada antes de enviar la imagen.")
     try:
         response = requests.post(
             f"{base_url}/chat/completions",
@@ -432,7 +477,20 @@ def annotate_image(
         )
         response.raise_for_status()
         body = response.json()
-        content = body["choices"][0]["message"]["content"]
+        choice = body["choices"][0]
+        content = choice["message"]["content"]
+        finish_reason = choice.get("finish_reason")
+    except requests.HTTPError as error:
+        status = response.status_code
+        detail = response.text[:500].replace(api_key, "[REDACTED]")
+        raise RuntimeError(
+            f"El proveedor {provider} respondió HTTP {status} para el modelo {model}. "
+            f"Detalle: {detail or 'sin detalle'}"
+        ) from error
+    except requests.Timeout as error:
+        raise AnnotationTimeoutError(
+            f"Timeout al solicitar anotación al proveedor {provider}: {error}"
+        ) from error
     except requests.RequestException as error:
         raise RuntimeError(
             f"Falló la solicitud de anotación al proveedor {provider}: {error}"
@@ -442,11 +500,20 @@ def annotate_image(
 
     if not isinstance(content, str):
         raise ValueError("El proveedor debe responder texto JSON en choices[0].message.content.")
-    result = parse_model_json(content)
+    try:
+        result = parse_model_json(content)
+    except ValueError as error:
+        raise ValueError(
+            f"El proveedor devolvió JSON inválido "
+            f"(finish_reason={finish_reason or 'desconocido'}, "
+            f"caracteres={len(content)}): {error}"
+        ) from error
     suitable = result.get("apta")
     if not isinstance(suitable, bool):
         raise ValueError("El proveedor debe indicar apta como booleano.")
     reason = result.get("motivo_descarte", "")
+    if reason is None and suitable:
+        reason = ""
     if not isinstance(reason, str):
         raise ValueError("El campo motivo_descarte debe ser texto.")
     if not suitable:
@@ -560,6 +627,32 @@ def import_one(
     return True
 
 
+def filter_duplicate_plans(
+    plans: list[tuple[str, dict, dict]], database: Path
+) -> tuple[list[tuple[str, dict, dict]], int]:
+    imported_hashes = set()
+    if database.is_file():
+        with sqlite3.connect(database) as connection:
+            imported_hashes = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT DISTINCT sha256 FROM prenda_imagen WHERE sha256 IS NOT NULL"
+                )
+            }
+
+    seen_hashes = set(imported_hashes)
+    unique_plans = []
+    duplicates = 0
+    for plan in plans:
+        digest = plan[2]["digest"]
+        if digest in seen_hashes:
+            duplicates += 1
+            continue
+        seen_hashes.add(digest)
+        unique_plans.append(plan)
+    return unique_plans, duplicates
+
+
 def command_ingest(args: argparse.Namespace, selected: dict) -> int:
     if args.limit is not None and args.limit < 1:
         raise ValueError("--limit debe ser un entero positivo.")
@@ -603,24 +696,36 @@ def command_ingest(args: argparse.Namespace, selected: dict) -> int:
             items = supported_items
         plans.extend((source_id, source, item) for item in items)
 
+    if args.execute and plans:
+        ensure_database(database)
+    plans, pre_skipped_duplicates = filter_duplicate_plans(plans, database)
     if args.limit is not None:
         plans = plans[:args.limit]
     print(
         f"Imágenes preparadas para procesar: {len(plans)}; proveedor={args.provider}; "
-        f"formatos no admitidos omitidos={skipped_remote_format}."
+        f"formatos no admitidos omitidos={skipped_remote_format}; "
+        f"duplicadas omitidas antes de IA={pre_skipped_duplicates}."
     )
     if not args.execute:
         print("Ensayo solamente. Añade --execute para copiar imágenes y escribir SQLite.")
         return 0
     if not plans:
-        print("No hay imágenes elegibles. Revisa auditoría, carpetas fuente y dudas.md.")
+        if pre_skipped_duplicates:
+            print(
+                "Todas las imágenes elegibles ya estaban importadas; "
+                "se omitieron antes de llamar a la IA."
+            )
+        else:
+            print("No hay imágenes elegibles. Revisa auditoría, carpetas fuente y dudas.md.")
         return 0
 
-    ensure_database(database)
     imported = 0
-    skipped = 0
+    skipped = pre_skipped_duplicates
     rejected = 0
     cache_hits = 0
+    invalid_annotations = 0
+    timed_out_images = 0
+    stopped = False
     with sqlite3.connect(database) as connection:
         connection.execute("PRAGMA foreign_keys = ON")
         colors = get_catalog(connection, "color")
@@ -629,6 +734,10 @@ def command_ingest(args: argparse.Namespace, selected: dict) -> int:
             connection, "prompt_instructions", DEFAULT_PROMPT_INSTRUCTIONS
         )
         for source_id, source, item in plans:
+            if CANCEL_REQUESTED.is_set():
+                stopped = True
+                print("Detención solicitada; no se enviarán más imágenes.")
+                break
             exists = connection.execute(
                 "SELECT 1 FROM prenda_imagen WHERE sha256 = ? LIMIT 1",
                 (item["digest"],),
@@ -651,17 +760,68 @@ def command_ingest(args: argparse.Namespace, selected: dict) -> int:
                 if annotation is not None:
                     cache_hits += 1
                 else:
-                    annotation = annotate_image(
-                        item["path"],
-                        item["category"],
-                        args.provider,
-                        api_key,
-                        base_url,
-                        model,
-                        colors,
-                        styles,
-                        prompt_instructions,
-                    )
+                    for attempt in range(2):
+                        if CANCEL_REQUESTED.is_set():
+                            stopped = True
+                            break
+                        try:
+                            annotation = annotate_image(
+                                item["path"],
+                                item["category"],
+                                args.provider,
+                                api_key,
+                                base_url,
+                                model,
+                                colors,
+                                styles,
+                                prompt_instructions,
+                            )
+                            break
+                        except AnnotationTimeoutError as error:
+                            if args.provider != "nim":
+                                raise
+                            if attempt == 0:
+                                if CANCEL_REQUESTED.is_set():
+                                    stopped = True
+                                    break
+                                delay = random.randint(
+                                    NIM_TIMEOUT_RETRY_MIN_SECONDS,
+                                    NIM_TIMEOUT_RETRY_MAX_SECONDS,
+                                )
+                                print(
+                                    f"Timeout de NIM para {item['relative_path']}; "
+                                    f"se reintentará la misma imagen en {delay} segundos."
+                                )
+                                if CANCEL_REQUESTED.wait(delay):
+                                    stopped = True
+                                    print(
+                                        "Detención solicitada durante la espera; "
+                                        "no se reintentará ni se enviarán más imágenes."
+                                    )
+                                    break
+                            else:
+                                timed_out_images += 1
+                                print(
+                                    f"Segundo timeout de NIM; imagen omitida y se continúa "
+                                    f"con la siguiente ({source_id}/{item['label']}): "
+                                    f"{item['relative_path']} — {error}"
+                                )
+                        except ProcessingCancelled:
+                            stopped = True
+                            break
+                        except ValueError as error:
+                            invalid_annotations += 1
+                            print(
+                                f"Respuesta inválida de IA; imagen omitida sin guardar "
+                                f"análisis ({source_id}/{item['label']}): "
+                                f"{item['relative_path']} — {error}"
+                            )
+                            break
+                    if stopped:
+                        print("Detención solicitada; no se enviarán más imágenes.")
+                        break
+                    if annotation is None:
+                        continue
                     save_analysis(
                         connection, fingerprint, item, args.provider, model, annotation
                     )
@@ -701,16 +861,25 @@ def command_ingest(args: argparse.Namespace, selected: dict) -> int:
                     except OSError:
                         pass
                 raise
+            if CANCEL_REQUESTED.is_set():
+                stopped = True
+                print("Detención solicitada; lote detenido tras completar la imagen actual.")
+                break
 
     print(
         f"Importadas: {imported}; duplicadas omitidas: {skipped}; "
         f"descartadas por IA: {rejected}; análisis reutilizados: {cache_hits}; "
+        f"respuestas inválidas omitidas: {invalid_annotations}; "
+        f"timeouts agotados omitidos: {timed_out_images}; "
+        f"detenido={str(stopped or CANCEL_REQUESTED.is_set()).lower()}; "
         "estado_revision=pendiente."
     )
     return 0
 
 
 def main() -> int:
+    CANCEL_REQUESTED.clear()
+    install_cancellation_handler()
     args = parse_args()
     sources = load_sources()
     selected = select_sources(sources, args.source)

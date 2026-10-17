@@ -14,7 +14,7 @@
     .sub,.muted { color:var(--muted) } main { max-width:1180px; margin:24px auto; padding:0 20px 48px }
     .actions,.row { display:flex; gap:10px; flex-wrap:wrap; align-items:center }
     button { color:var(--text); background:#263547; border:1px solid #40546b; border-radius:8px; padding:10px 14px; font:inherit; cursor:pointer }
-    button:hover { border-color:var(--accent) } button.primary { background:#14644f; border-color:#218c6d } button.subtle { background:transparent }
+    button:hover { border-color:var(--accent) } button.primary { background:#14644f; border-color:#218c6d } button.danger { background:#702e35; border-color:#a54853 } button.subtle { background:transparent } button:disabled { opacity:.55; cursor:not-allowed }
     .grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; margin-bottom:18px }
     .panel,.stat { border:1px solid var(--line); border-radius:12px; background:var(--panel); padding:18px }
     .stat .label { color:var(--muted); font-size:13px } .stat strong { display:block; font-size:30px; margin:4px 0 }
@@ -68,7 +68,8 @@
           <label><input id="confirmWrite" type="checkbox" required><span>Confirmo que el lote puede copiar imágenes al dataset y escribir en SQLite.</span></label>
           <label id="remoteConsentRow" hidden><input id="confirmRemote" type="checkbox"><span>Autorizo enviar hasta el máximo indicado a una IA externa. Puede consumir cuota o generar cargos; revisé el proveedor elegido.</span></label>
         </div>
-        <div class="row"><button id="startIngestButton" class="primary" type="submit">▶ Iniciar procesamiento</button><span id="jobMessage" role="status" class="muted">Elige una fuente y confirma antes de iniciar.</span></div>
+        <div class="row"><button id="startIngestButton" class="primary" type="submit">▶ Iniciar procesamiento</button><button id="stopIngestButton" class="danger" type="button" disabled>■ Detener envío</button><span id="jobMessage" role="status" class="muted">Elige una fuente y confirma antes de iniciar.</span></div>
+        <p class="muted">Al detener, se evita iniciar más solicitudes. La imagen que ya esté siendo analizada puede terminar antes de cerrar el lote.</p>
       </form>
       <pre id="jobLogs" class="job-console" aria-live="polite">El registro del proceso aparecerá aquí.</pre>
     </section>
@@ -205,13 +206,15 @@
     }
     async function refresh() { try { render(await request("/api/overview")); setStatus("status",`Actualizado ${new Date().toLocaleTimeString("es-MX")}`); } catch(error) { setStatus("status",error.message,"error"); } }
     function renderJob(job) {
-      const stateNames={idle:"Sin iniciar",running:"En curso",completed:"Finalizado",failed:"Error"};
+      const stateNames={idle:"Sin iniciar",running:job.cancellation_requested?"Detención solicitada":"En curso",completed:"Finalizado",cancelled:"Detenido",failed:"Error"};
       $("jobState").textContent=stateNames[job.status] || job.status;
       $("jobState").className=`job-state ${job.status}`;
       $("jobMessage").textContent=job.message;
-      $("jobMessage").className=job.status==="failed"?"error":job.status==="completed"?"success":"muted";
+      $("jobMessage").className=job.status==="failed"?"error":["completed","cancelled"].includes(job.status)?"success":"muted";
       $("startIngestButton").disabled=job.status==="running";
       $("startIngestButton").textContent=job.status==="running"?"Procesamiento en curso…":"▶ Iniciar procesamiento";
+      $("stopIngestButton").disabled=job.status!=="running" || job.cancellation_requested;
+      $("stopIngestButton").textContent=job.cancellation_requested?"Detención solicitada…":"■ Detener envío";
       const logText=(job.logs || []).join("\n");
       $("jobLogs").textContent=logText || (job.status==="running"?"Esperando salida del proceso…":"El registro del proceso aparecerá aquí.");
       $("jobLogs").scrollTop=$("jobLogs").scrollHeight;
@@ -247,6 +250,15 @@
         renderJob(job);
         $("confirmWrite").checked=false; $("confirmRemote").checked=false;
       } catch(error) { setStatus("jobMessage",error.message,"error"); button.disabled=false; }
+    });
+    $("stopIngestButton").addEventListener("click",async()=>{
+      const button=$("stopIngestButton"); button.disabled=true;
+      try {
+        renderJob(await request("/api/stop",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"}));
+      } catch(error) {
+        setStatus("jobMessage",error.message,"error");
+        await refreshJob();
+      }
     });
     $("promptButton").addEventListener("click",async()=>{ try { latestData=await request("/api/overview"); $("promptText").value=latestData.prompt_instructions; $("promptPreview").textContent=latestData.prompt_preview; setStatus("promptStatus",""); openDialog("promptModal"); } catch(e) { setStatus("status",e.message,"error"); } });
     $("promptText").addEventListener("input",()=>{ if(latestData) { const marker="\n\nInstrucciones:\n"; const start=latestData.prompt_preview.indexOf(marker); const end=latestData.prompt_preview.indexOf("\n\nDevuelve solo JSON",start); $("promptPreview").textContent=`${latestData.prompt_preview.slice(0,start)}${marker}${$("promptText").value}${latestData.prompt_preview.slice(end)}`; } });
