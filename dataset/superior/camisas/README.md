@@ -2,7 +2,7 @@
 
 ## Criterio de inclusión
 
-Clase única para prendas superiores con abertura frontal y cuello, así como prendas superiores cerradas sin abertura frontal completa. Incluye las variantes que comúnmente se denominan camisetas; todas se registran como `camisa` en `dataset/superior/camisas/`.
+Clase única para prendas superiores con abertura frontal y cuello, así como prendas superiores cerradas sin abertura frontal completa. Incluye las variantes que comúnmente se denominan camisetas; todas se registran como `camisa` en `dataset/superior/camisas/`. Durante la ingesta, la etiqueta de fuente `camiseta` se normaliza a `camisa`; el nombre original se conserva en `prenda_imagen.etiqueta_fuente` para trazabilidad.
 
 ## No confundir con
 

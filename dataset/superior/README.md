@@ -1,6 +1,6 @@
 # Prendas de la parte superior
 
-Guarda aquí las categorías de prendas que cubren principalmente el torso: camisas, blusas, chaquetas, abrigos y suéteres. En este proyecto, camisas y camisetas se agrupan bajo la única clase `camisa` y se guardan en `camisas/`.
+Guarda aquí las categorías de prendas que cubren principalmente el torso: camisas, blusas, chaquetas, abrigos y suéteres. En este proyecto, camisas y camisetas se agrupan bajo la única clase canónica `camisa` y se guardan en `camisas/`; no hay una carpeta/clase aparte para camisetas. La ingesta normaliza ambas etiquetas y conserva el nombre original de la fuente en SQLite.
 
 Usa la subcarpeta específica de cada tipo y sigue su guía de etiquetado. No mezcles en una misma clase el tipo de prenda y sus atributos: por ejemplo, `camisa` es el tipo; `roja` puede ser su color y `deportiva` su estilo.
 

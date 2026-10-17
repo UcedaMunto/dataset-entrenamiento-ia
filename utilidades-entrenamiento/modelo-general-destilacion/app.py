@@ -30,13 +30,17 @@ NIM_TIMEOUT_RETRY_MIN_SECONDS = 30
 NIM_TIMEOUT_RETRY_MAX_SECONDS = 120
 _nim_request_lock = threading.Lock()
 _last_nim_request_at: float | None = None
+NIM_MODEL_MAX_STRIKES = 4
+_nim_model_strikes: dict[str, int] = {}
+_NIM_PERMANENT_ERROR = re.compile(r"HTTP (401|403|404)\b")
+_NIM_TRANSIENT_ERROR = re.compile(r"HTTP (429|5\d\d)\b")
 CANCEL_REQUESTED = threading.Event()
 ANALYSIS_PROMPT_VERSION = "4"
 NIM_ANALYSIS_PROMPT_VERSION = "5"
 NIM_VISION_MODEL = "nvidia/nemotron-3.5-super-vl-120b-a12b"
 DEFAULT_NIM_FALLBACK_MODELS = (
     "meta/llama-3.2-11b-vision-instruct",
-    "nvidia/nemotron-3.5-super-vl-120b-a12b",
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
 )
 DEFAULT_PROMPT_INSTRUCTIONS = (
     "Determina si la imagen muestra claramente una sola prenda de la clase indicada. "
@@ -552,7 +556,18 @@ def parse_model_json(content: str) -> dict:
     try:
         result = json.loads(text)
     except json.JSONDecodeError as error:
-        raise ValueError(f"El proveedor no devolvió JSON válido: {error}") from error
+        result = None
+        start = text.find("{")
+        if start != -1:
+            try:
+                result, _ = json.JSONDecoder().raw_decode(text[start:])
+            except json.JSONDecodeError:
+                result = None
+        if result is None:
+            raise ValueError(
+                f"El proveedor no devolvió JSON válido: {error}. "
+                f"Salida: {text[:120]!r}"
+            ) from error
     if not isinstance(result, dict):
         raise ValueError("La respuesta del proveedor debe ser un objeto JSON.")
     return result
@@ -1013,6 +1028,11 @@ def annotate_with_provider_fallback(
             for candidate_model in nim_model_chain(nim_model)
             if candidate_model not in unavailable_nim_models
         )
+    if not candidates:
+        raise RuntimeError(
+            "No quedan modelos NVIDIA NIM disponibles en esta ejecución; "
+            "se detiene el lote para evitar repetir llamadas a modelos fallidos."
+        )
 
     exhausted_timeouts = 0
     failed_nim_models: set[str] = set()
@@ -1035,8 +1055,10 @@ def annotate_with_provider_fallback(
                     instructions,
                     seasons=seasons,
                 )
+                unavailable_nim_models.update(failed_nim_models)
+                if candidate_provider == "nim":
+                    _nim_model_strikes.pop(candidate_model, None)
                 if candidate_index:
-                    unavailable_nim_models.update(failed_nim_models)
                     print(
                         f"Fallback completado: {candidate_provider}/{candidate_model} "
                         f"para {path.name}."
@@ -1069,10 +1091,24 @@ def annotate_with_provider_fallback(
                 break
             except (RuntimeError, ValueError) as error:
                 last_error = error
+                if (
+                    attempt == 0
+                    and candidate_provider == "nim"
+                    and _NIM_TRANSIENT_ERROR.search(str(error))
+                ):
+                    print(f"Error transitorio de NIM con {candidate_model}; se reintenta en 3 segundos.")
+                    if CANCEL_REQUESTED.wait(3):
+                        raise ProcessingCancelled(
+                            "Detención solicitada durante la espera de reintento NIM."
+                        ) from error
+                    continue
                 break
 
         if candidate_provider == "nim":
-            failed_nim_models.add(candidate_model)
+            strikes = _nim_model_strikes.get(candidate_model, 0) + 1
+            _nim_model_strikes[candidate_model] = strikes
+            if strikes >= NIM_MODEL_MAX_STRIKES or _NIM_PERMANENT_ERROR.search(str(last_error)):
+                failed_nim_models.add(candidate_model)
         if candidate_index + 1 < len(candidates):
             next_provider, _, _, next_model = candidates[candidate_index + 1]
             print(
@@ -1080,6 +1116,7 @@ def annotate_with_provider_fallback(
                 f"{last_error}. Se intentará {next_provider}/{next_model}."
             )
 
+    unavailable_nim_models.update(failed_nim_models)
     if last_error is None:
         raise RuntimeError("No se pudo iniciar la anotación con ningún proveedor.")
     if provider == "deepseek" and nim_settings is None:

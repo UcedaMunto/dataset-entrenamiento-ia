@@ -24,7 +24,7 @@ DATABASE = DATASET_ROOT / "metadata.sqlite"
 PORT = int(os.environ.get("DASHBOARD_PORT", "8787"))
 HOST = os.environ.get("DASHBOARD_HOST", "127.0.0.1")
 TARGET_COUNT = 5000
-MAX_BATCH_SIZE = 5000
+MAX_BATCH_SIZE = 15000
 PROVIDERS = {
     "openai": "OPENAI_API_KEY",
     "nim": "NVIDIA_NIM_API_KEY",

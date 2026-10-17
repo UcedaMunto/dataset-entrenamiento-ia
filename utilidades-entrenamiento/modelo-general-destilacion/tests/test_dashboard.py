@@ -241,16 +241,16 @@ class DashboardTests(unittest.TestCase):
         })
         self.assertEqual((source_id, provider, limit), ("clothing-full", "none", 1))
 
-    def test_ingest_accepts_5000_and_rejects_more(self):
+    def test_ingest_accepts_15000_and_rejects_more(self):
         payload = {
             "source": "all",
             "provider": "none",
-            "limit": 5000,
+            "limit": 15000,
             "confirm_write": True,
         }
-        self.assertEqual(dashboard.validate_ingest_request(payload)[2], 5000)
-        with self.assertRaisesRegex(ValueError, "1 y 5000"):
-            dashboard.validate_ingest_request({**payload, "limit": 5001})
+        self.assertEqual(dashboard.validate_ingest_request(payload)[2], 15000)
+        with self.assertRaisesRegex(ValueError, "1 y 15000"):
+            dashboard.validate_ingest_request({**payload, "limit": 15001})
 
     def test_start_ingest_launches_bounded_command_without_secret_arguments(self):
         states = {}

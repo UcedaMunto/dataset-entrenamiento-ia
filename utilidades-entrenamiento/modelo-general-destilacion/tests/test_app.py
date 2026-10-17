@@ -80,6 +80,10 @@ CREATE TABLE pipeline_config (
 class CurationPipelineTests(unittest.TestCase):
     def setUp(self):
         app.CANCEL_REQUESTED.clear()
+        app._nim_model_strikes.clear()
+        strikes_patch = patch.object(app, "NIM_MODEL_MAX_STRIKES", 1)
+        strikes_patch.start()
+        self.addCleanup(strikes_patch.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         self.dataset_root = self.root / "dataset"
@@ -162,13 +166,14 @@ class CurationPipelineTests(unittest.TestCase):
 
     def test_nim_automatically_switches_to_fallback_model_after_failure(self):
         annotation = {"apta": False, "motivo_descarte": "No es una camisa."}
+        unavailable_models = set()
         with patch.dict(
             os.environ,
             {"NVIDIA_NIM_FALLBACK_MODELS": "meta/llama-3.2-11b-vision-instruct"},
         ), patch.object(
             app,
             "annotate_image",
-            side_effect=[RuntimeError("NIM HTTP 500"), annotation],
+            side_effect=[RuntimeError("NIM HTTP 404"), annotation],
         ) as annotate:
             result = app.annotate_with_provider_fallback(
                 self.image_path,
@@ -181,6 +186,7 @@ class CurationPipelineTests(unittest.TestCase):
                 ["casual"],
                 app.DEFAULT_PROMPT_INSTRUCTIONS,
                 ["invierno"],
+                unavailable_nim_models=unavailable_models,
             )
 
         self.assertEqual(
@@ -194,6 +200,84 @@ class CurationPipelineTests(unittest.TestCase):
                 "meta/llama-3.2-11b-vision-instruct",
             ],
         )
+        self.assertEqual(
+            unavailable_models,
+            {"nvidia/nemotron-3.5-super-vl-120b-a12b"},
+        )
+
+    def test_all_failed_nim_models_are_not_retried_for_later_images(self):
+        primary_model = "nvidia/nemotron-3.5-super-vl-120b-a12b"
+        fallback_model = "meta/llama-3.2-11b-vision-instruct"
+        unavailable_models = set()
+        with patch.dict(
+            os.environ,
+            {"NVIDIA_NIM_FALLBACK_MODELS": fallback_model},
+        ), patch.object(
+            app,
+            "annotate_image",
+            side_effect=[RuntimeError("HTTP 404 invalid"), RuntimeError("HTTP 404 invalid")],
+        ) as annotate:
+            with self.assertRaisesRegex(RuntimeError, "HTTP 404 invalid"):
+                app.annotate_with_provider_fallback(
+                    self.image_path,
+                    "camisa",
+                    "nim",
+                    "nim-key",
+                    "https://nim.test/v1",
+                    primary_model,
+                    ["azul"],
+                    ["casual"],
+                    app.DEFAULT_PROMPT_INSTRUCTIONS,
+                    ["invierno"],
+                    unavailable_nim_models=unavailable_models,
+                )
+
+            self.assertEqual(unavailable_models, {primary_model, fallback_model})
+            with self.assertRaisesRegex(RuntimeError, "No quedan modelos NVIDIA NIM"):
+                app.annotate_with_provider_fallback(
+                    self.image_path,
+                    "camisa",
+                    "nim",
+                    "nim-key",
+                    "https://nim.test/v1",
+                    primary_model,
+                    ["azul"],
+                    ["casual"],
+                    app.DEFAULT_PROMPT_INSTRUCTIONS,
+                    ["invierno"],
+                    unavailable_nim_models=unavailable_models,
+                )
+
+        self.assertEqual(annotate.call_count, 2)
+
+    def test_transient_nim_500_is_retried_and_does_not_exclude_model(self):
+        annotation = {"apta": False, "motivo_descarte": "No es una camisa."}
+        unavailable_models = set()
+        primary_model = "nvidia/nemotron-3.5-super-vl-120b-a12b"
+        with patch.object(app, "NIM_MODEL_MAX_STRIKES", 4), patch.object(
+            app,
+            "annotate_image",
+            side_effect=[RuntimeError("NIM HTTP 500"), annotation],
+        ) as annotate, patch.object(app.CANCEL_REQUESTED, "wait", return_value=False):
+            result = app.annotate_with_provider_fallback(
+                self.image_path, "camisa", "nim", "nim-key", "https://nim.test/v1",
+                primary_model, ["azul"], ["casual"], app.DEFAULT_PROMPT_INSTRUCTIONS,
+                ["invierno"], unavailable_nim_models=unavailable_models,
+            )
+        self.assertEqual(result[2], primary_model)
+        self.assertEqual(annotate.call_count, 2)
+        self.assertEqual(unavailable_models, set())
+
+    def test_default_nim_model_chain_includes_two_additional_vision_models(self):
+        with patch.dict(os.environ, {"NVIDIA_NIM_FALLBACK_MODELS": ""}):
+            self.assertEqual(
+                app.nim_model_chain("primary-model"),
+                [
+                    "primary-model",
+                    "meta/llama-3.2-11b-vision-instruct",
+                    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+                ],
+            )
 
     def test_deepseek_failure_falls_back_to_nim(self):
         annotation = {
@@ -578,7 +662,7 @@ class CurationPipelineTests(unittest.TestCase):
         self.assertTrue(result["apta"])
         self.assertEqual(result["motivo_descarte"], "")
 
-    def test_invalid_annotation_skips_image_and_continues_batch(self):
+    def test_invalid_annotations_exhausting_nim_stop_batch_without_retries(self):
         second_path = self.root / "shirt-two.png"
         Image.new("RGB", (16, 16), (90, 20, 40)).save(second_path)
         second_item = {
@@ -587,32 +671,21 @@ class CurationPipelineTests(unittest.TestCase):
             "relative_path": Path("train/camisa/shirt-two.png"),
             "digest": hashlib.sha256(second_path.read_bytes()).hexdigest(),
         }
-        valid_annotation = {
-            "apta": True,
-            "motivo_descarte": "",
-            "descripcion": "Camisa roja.",
-            "colores": ["azul"],
-            "estilos": ["casual"],
-        }
         with patch.object(
             app,
             "annotate_image",
             side_effect=[
                 ValueError("invalid provider shape"),
                 ValueError("fallback response also invalid"),
-                valid_annotation,
             ],
         ) as annotate:
-            self.assertEqual(self.run_ingest(items=[self.item, second_item]), 0)
+            with self.assertRaisesRegex(RuntimeError, "No quedan modelos NVIDIA NIM"):
+                self.run_ingest(items=[self.item, second_item])
 
-        self.assertEqual(annotate.call_count, 3)
+        self.assertEqual(annotate.call_count, 2)
         with sqlite3.connect(self.database) as connection:
-            self.assertEqual(connection.execute("SELECT COUNT(*) FROM analisis_imagen").fetchone()[0], 1)
-            self.assertEqual(connection.execute("SELECT COUNT(*) FROM prenda").fetchone()[0], 1)
-            self.assertEqual(
-                connection.execute("SELECT sha256 FROM prenda_imagen").fetchone()[0],
-                second_item["digest"],
-            )
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM analisis_imagen").fetchone()[0], 0)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM prenda").fetchone()[0], 0)
 
     def test_stop_after_current_analysis_prevents_sending_the_next_image(self):
         second_path = self.root / "shirt-after-stop.png"
@@ -668,7 +741,7 @@ class CurationPipelineTests(unittest.TestCase):
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM analisis_imagen").fetchone()[0], 0)
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM prenda").fetchone()[0], 0)
 
-    def test_nim_timeout_retries_same_image_then_continues_to_next_image(self):
+    def test_nim_timeout_retries_models_then_stops_after_chain_is_exhausted(self):
         second_path = self.root / "shirt-after-timeout.png"
         Image.new("RGB", (16, 16), (90, 20, 40)).save(second_path)
         second_item = {
@@ -676,13 +749,6 @@ class CurationPipelineTests(unittest.TestCase):
             "path": second_path,
             "relative_path": Path("train/camisa/shirt-after-timeout.png"),
             "digest": hashlib.sha256(second_path.read_bytes()).hexdigest(),
-        }
-        valid_annotation = {
-            "apta": True,
-            "motivo_descarte": "",
-            "descripcion": "Camisa roja.",
-            "colores": ["azul"],
-            "estilos": ["casual"],
         }
         with (
             patch.object(
@@ -693,15 +759,15 @@ class CurationPipelineTests(unittest.TestCase):
                     app.AnnotationTimeoutError("second timeout"),
                     app.AnnotationTimeoutError("fallback first timeout"),
                     app.AnnotationTimeoutError("fallback second timeout"),
-                    valid_annotation,
                 ],
             ) as annotate,
             patch.object(app.random, "randint", return_value=73) as randint,
             patch.object(app.CANCEL_REQUESTED, "wait", return_value=False) as wait,
         ):
-            self.assertEqual(self.run_ingest(items=[self.item, second_item]), 0)
+            with self.assertRaisesRegex(RuntimeError, "No quedan modelos NVIDIA NIM"):
+                self.run_ingest(items=[self.item, second_item])
 
-        self.assertEqual(annotate.call_count, 5)
+        self.assertEqual(annotate.call_count, 4)
         self.assertEqual(
             [call.args[0] for call in annotate.call_args_list],
             [
@@ -709,19 +775,14 @@ class CurationPipelineTests(unittest.TestCase):
                 self.item["path"],
                 self.item["path"],
                 self.item["path"],
-                second_item["path"],
             ],
         )
         self.assertEqual(randint.call_count, 2)
         self.assertEqual(randint.call_args_list, [unittest.mock.call(30, 120)] * 2)
         self.assertEqual(wait.call_args_list, [unittest.mock.call(73)] * 2)
         with sqlite3.connect(self.database) as connection:
-            self.assertEqual(connection.execute("SELECT COUNT(*) FROM analisis_imagen").fetchone()[0], 1)
-            self.assertEqual(connection.execute("SELECT COUNT(*) FROM prenda_imagen").fetchone()[0], 1)
-            self.assertEqual(
-                connection.execute("SELECT sha256 FROM prenda_imagen").fetchone()[0],
-                second_item["digest"],
-            )
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM analisis_imagen").fetchone()[0], 0)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM prenda_imagen").fetchone()[0], 0)
 
     def test_imported_images_are_filtered_before_applying_batch_limit(self):
         items = [self.item]
@@ -1031,7 +1092,7 @@ class CurationPipelineTests(unittest.TestCase):
 
     def test_nim_retries_invalid_json_per_stage_and_combines_results(self):
         contents = [
-            '{"colores":["azul"]} contenido extra',
+            '{"colores":["azul"',
             '{"colores":["azul","inventado"]}',
             '{"estilos":"casual"}',
             '{"estilos":["casual"]}',

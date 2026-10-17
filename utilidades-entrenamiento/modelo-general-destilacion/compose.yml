@@ -17,7 +17,7 @@ services:
       NVIDIA_NIM_API_KEY: ${NVIDIA_NIM_API_KEY:-}
       NVIDIA_NIM_BASE_URL: ${NVIDIA_NIM_BASE_URL:-https://integrate.api.nvidia.com/v1}
       NVIDIA_NIM_MODEL: ${NVIDIA_NIM_MODEL:-nvidia/nemotron-3.5-super-vl-120b-a12b}
-      NVIDIA_NIM_FALLBACK_MODELS: ${NVIDIA_NIM_FALLBACK_MODELS:-meta/llama-3.2-11b-vision-instruct,nvidia/nemotron-3.5-super-vl-120b-a12b}
+      NVIDIA_NIM_FALLBACK_MODELS: ${NVIDIA_NIM_FALLBACK_MODELS:-meta/llama-3.2-11b-vision-instruct,nvidia/nemotron-3-nano-omni-30b-a3b-reasoning}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
       DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-flash}
@@ -40,7 +40,7 @@ services:
       DATASET_ROOT: /app/dataset
       DASHBOARD_HOST: 127.0.0.1
       DASHBOARD_PORT: 8787
-      NVIDIA_NIM_FALLBACK_MODELS: ${NVIDIA_NIM_FALLBACK_MODELS:-meta/llama-3.2-11b-vision-instruct,nvidia/nemotron-3.5-super-vl-120b-a12b}
+      NVIDIA_NIM_FALLBACK_MODELS: ${NVIDIA_NIM_FALLBACK_MODELS:-meta/llama-3.2-11b-vision-instruct,nvidia/nemotron-3-nano-omni-30b-a3b-reasoning}
     volumes:
       - ./datos-crudos:/app/datos-crudos:ro
       - ../../dataset:/app/dataset

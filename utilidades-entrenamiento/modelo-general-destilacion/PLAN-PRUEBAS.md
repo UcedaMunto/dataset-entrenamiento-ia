@@ -106,7 +106,7 @@ Comprobar:
 - El modal de credenciales indica presencia de claves sin revelar sus valores. Reemplazar una key debe conservar campos vacíos, actualizar `.env` con modo 600 y no incluir el secreto en respuestas o logs.
 - Solicitudes POST con host/origen ajeno son rechazadas; las claves no existen en SQLite.
 - El servicio está publicado en `127.0.0.1`, no en `0.0.0.0` del host.
-- La tarjeta **Procesar imágenes ahora** ofrece solo fuentes importables, inicia hasta dos lotes en paralelo (uno por proveedor remoto), cada uno con límite de 1–5.000 imágenes, y presenta estado/salida por separado.
+- La tarjeta **Procesar imágenes ahora** ofrece solo fuentes importables, inicia hasta dos lotes en paralelo (uno por proveedor remoto), cada uno con límite de 1–15.000 imágenes, y presenta estado/salida por separado.
 - Con NIM y DeepSeek seleccionados, validar que se crean dos procesos independientes con el mismo límite y que cada uno llama solo a su proveedor.
 - Enviar ambos proveedores sobre imágenes comunes y verificar que una imagen se incorpora una sola vez aunque los dos procesos terminen su análisis; la escritura SQLite debe serializarse y el segundo importador debe registrar el duplicado.
 - **Detener envío** solicita la cancelación solo al proceso proveedor elegido; el estado pasa a “detención solicitada” y luego “detenido”. Una solicitud ya activa puede finalizar/importarse, pero no se inicia otra. Si se detiene durante el backoff de timeout, no se reintenta ni se avanza a otra imagen. La otra ejecución en paralelo debe continuar.
@@ -122,5 +122,5 @@ Comprobar:
 5. No se importan imágenes de clases fuera del mapeo ni mayores de 200.000 bytes.
 6. Las muestras aprobadas por la IA continúan pendientes de revisión humana y no habilitadas para entrenamiento.
 7. El dashboard solo responde en localhost, las claves se ocultan y los cambios de prompt/vocabulario afectan los procesos futuros.
-8. Cada proveedor acepta un límite de hasta 5.000 prendas; al seleccionar NIM y DeepSeek se inician trabajos paralelos independientes.
+8. Cada proveedor acepta un límite de hasta 15.000 prendas; al seleccionar NIM y DeepSeek se inician trabajos paralelos independientes.
 9. La importación concurrente de un mismo hash crea una sola prenda y una sola imagen registrada en SQLite.

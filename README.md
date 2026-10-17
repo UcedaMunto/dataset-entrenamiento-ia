@@ -8,7 +8,7 @@ Módulo pequeño de visión por computadora para complementar el proyecto de Ope
 - Color o colores básicos: negro, blanco, rojo, azul, rosa, etc.
 - Estilo: casual, elegante, fiesta, verano, deportivo, etc.
 
-El entrenamiento del MVP se ejecutará con **Docker Compose** en una laptop. No necesita Kubernetes, un servidor de base de datos, una API ni una interfaz web para entrenar. Usa SQLite local únicamente para los metadatos del dataset. La integración con el proyecto principal se deja para después; la anotación opcional de datasets externos usa servicios de visión por separado.
+El entrenamiento del MVP se ejecutará con **Docker Compose** en una laptop. No necesita Kubernetes, un servidor de base de datos, una API ni una interfaz web para entrenar. Usa SQLite local únicamente para los metadatos del dataset. La integración con el proyecto principal se deja para después. La preparación de datos incluye un pipeline separado para auditar e importar fuentes y, si se autoriza, pedir anotaciones a proveedores de visión; esas anotaciones son sugerencias pendientes de revisión y no son el modelo que se entrena.
 
 ## Decisión técnica para el MVP
 
@@ -54,7 +54,7 @@ dataset/
 └── inferior_superior/vestido/VESTIDO-1/frente.jpg
 ```
 
-La clase `camisa` agrupa las prendas superiores con abertura frontal y las camisetas; ambas se guardan en `superior/camisas/` y usan la misma etiqueta. Los tipos de prenda del catálogo inicial son abrigo, blusa, camisa, chaqueta, falda, pantalón, short, suéter y vestido.
+La clase canónica `camisa` agrupa las prendas superiores con abertura frontal y las camisetas; ambas se guardan en `superior/camisas/` y usan la misma etiqueta. En la ingesta, `camisa` y `camiseta` se normalizan a esa clase, y se conserva la etiqueta original en SQLite para trazabilidad. Los tipos de prenda del catálogo inicial son abrigo, blusa, camisa, chaqueta, falda, pantalón, short, suéter y vestido.
 
 El esquema usa siete tablas:
 
@@ -85,6 +85,8 @@ Reglas esenciales:
 5. Solo usar registros aprobados, aptos para entrenamiento y con permiso verificado.
 6. El proceso MobileNet leerá SQLite y comprobará las imágenes referenciadas antes de entrenar.
 
+La clase canónica `camisa` reúne camisas y camisetas. Esa unificación se aplica a las etiquetas de fuentes externas durante el escaneo y la importación; el texto de la etiqueta de origen se conserva para trazabilidad, pero no se crea una clase `camiseta` independiente.
+
 ## Flujo de trabajo
 
 1. Definir la lista inicial de tipos, colores y estilos en el catálogo.
@@ -114,6 +116,8 @@ No se recomienda entrenamiento distribuido entre las laptops: añade configuraci
 ## Docker Compose
 
 La infraestructura inicial de entrenamiento se encuentra en [`utilidades-entrenamiento/`](./utilidades-entrenamiento/). El subproyecto [`modelo-general-destilacion/`](./utilidades-entrenamiento/modelo-general-destilacion/README.md) audita y prepara fuentes públicas con procedencia, revisión y anotación visual opcional; consulta su [`dudas.md`](./utilidades-entrenamiento/modelo-general-destilacion/dudas.md) antes de habilitar ingestión masiva.
+
+La anotación con NVIDIA NIM o DeepSeek es una etapa de **curación**, no entrenamiento: NIM divide el análisis en solicitudes breves; ante un fallo intenta modelos NIM alternativos configurados. Si DeepSeek falla y NVIDIA NIM está configurado, se intenta NIM como respaldo. Los resultados guardan proveedor/modelo efectivos y quedan pendientes de revisión humana. La interfaz permite seleccionar hasta 5.000 imágenes nuevas por proveedor, buscando en todas las fuentes elegibles u otra fuente elegida; hashes ya importados y análisis vigentes se filtran antes de aplicar ese límite. Cada proveedor alterno o fallback puede generar solicitudes adicionales fuera del límite inicial.
 
 ```text
 utilidades-entrenamiento/
@@ -171,8 +175,8 @@ No cambiar a otro modelo si una laptop no logra usar GPU: ejecutar la misma arqu
 2. ¿Qué tipos de prenda entran en la primera versión? Propongo empezar con camisa, pantalón, vestido, falda y chaqueta.
 3. ¿Qué colores básicos y qué estilos quieren incluir? ¿«Fiesta rosa» significa color rosa más estilo fiesta?
 4. ¿Las fotos muestran la prenda aislada, extendida, puesta en una persona o una combinación?
-5. ¿Cuántas imágenes tienen y son propias o cuentan con permiso para entrenar?
+5. ¿Cómo se verificará y registrará el permiso de uso de las imágenes propias y de nuevas fuentes?
 
 ## Factibilidad y estado de la versión 2
 
-La preparación local de carpetas y metadatos y el esqueleto ejecutable de entrenamiento Docker están implementados. La guía de [factibilidad, alcance y pendientes del dataset](./documentacion_dataset/README.md#factibilidad-y-alcance-del-mvp) detalla lo que bloquea una evaluación útil: aún se necesitan imágenes autorizadas y anotadas en train/val, y probar compatibilidad con las GPU concretas. Antes de entrenar, validar relaciones, rutas de imagen, etiquetas, permisos y splits. El [README de utilidades](./utilidades-entrenamiento/README.md) incluye comandos reproducibles.
+La preparación local de carpetas y metadatos y el esqueleto ejecutable de entrenamiento Docker están implementados. El dataset ya tiene imágenes importadas, pero el snapshot de SQLite descrito en la guía de [factibilidad, alcance y pendientes del dataset](./documentacion_dataset/README.md#factibilidad-y-alcance-del-mvp) tenía todas las prendas pendientes de revisión y ninguna habilitada para entrenamiento. Antes de entrenar, validar relaciones, rutas de imagen, etiquetas, permisos y splits, aprobar muestras suficientes para las clases elegidas y probar compatibilidad con las GPU concretas. El [README de utilidades](./utilidades-entrenamiento/README.md) incluye comandos reproducibles; la guía del [pipeline de curación](./utilidades-entrenamiento/modelo-general-destilacion/README.md) describe las fuentes y los análisis sugeridos por IA.

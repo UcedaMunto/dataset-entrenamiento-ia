@@ -71,6 +71,14 @@ El umbral por defecto proviene del checkpoint; se puede ajustar con `--threshold
 - [`repositorios/`](./repositorios/): espacio para clones auxiliares, excluidos de Git.
 - [`scraping-plugin-chrome/folder-destino/`](./scraping-plugin-chrome/folder-destino/README.md): extensión Chrome para descargar manualmente imágenes de producto con un clic.
 - [`modelo-general-destilacion/`](./modelo-general-destilacion/README.md): pipeline separado para auditar/importar datasets públicos, guardar resultados de análisis para evitar llamadas repetidas y generar descripciones revisables; ver también el [`plan de pruebas`](./modelo-general-destilacion/PLAN-PRUEBAS.md) y [`dudas.md`](./modelo-general-destilacion/dudas.md).
-- El panel local de seguimiento se levanta con `docker compose up -d dashboard` desde `modelo-general-destilacion`; monitorea conteos, actividad, prompt y opciones del proveedor en `http://127.0.0.1:8787`.
+- El panel local de seguimiento se levanta con `docker compose up -d --build dashboard` desde `modelo-general-destilacion`; monitorea conteos, actividad, prompt y opciones del proveedor en `http://127.0.0.1:8787`. También inicia/detiene lotes y muestra registros por proveedor; desde esos registros se pueden borrar líneas de error o congelar temporalmente la vista sin pausar el proceso.
 
-Todavía falta cargar y revisar suficientes imágenes autorizadas: en un dataset vacío o incompleto el contenedor se inicia, pero el entrenamiento termina con un mensaje explícito y no fabrica un modelo de éxito.
+## Pipeline de curación y anotación
+
+Este flujo es independiente del entrenamiento de MobileNetV3-Small. Su función es auditar fuentes, seleccionar imágenes mapeadas, detectar duplicados, solicitar anotaciones visuales opcionales y guardar sugerencias revisables en el dataset compartido. No aprueba etiquetas ni inicia entrenamiento automáticamente.
+
+La guía completa, las rutas fuente, límites de envío, claves, política de fallback y ejemplos de uso están en [`modelo-general-destilacion/README.md`](./modelo-general-destilacion/README.md). El pipeline unifica `camisa` y `camiseta` en la clase canónica `camisa`, manteniendo la etiqueta de origen en SQLite. En lotes remotos se pueden seleccionar hasta 5.000 imágenes nuevas por proveedor; se omiten hashes importados y análisis vigentes para el proveedor/modelo/configuración antes de aplicar el límite. La selección recomendada busca en todas las fuentes elegibles.
+
+Si está habilitado en `.env`, un fallo de NVIDIA NIM activa el siguiente modelo de la cadena `NVIDIA_NIM_FALLBACK_MODELS`; un fallo de DeepSeek activa NVIDIA NIM como respaldo. Estos intentos pueden enviar la imagen a otro modelo/proveedor y aumentar uso o costo, por lo que el dashboard solicita consentimiento remoto. Las claves se guardan fuera del repositorio y no deben incluirse en argumentos, documentos públicos ni commits.
+
+El dataset ya contiene imágenes importadas, pero falta revisar y aprobar suficientes muestras autorizadas para entrenamiento. En el snapshot documentado en la [guía de factibilidad](../documentacion_dataset/README.md#factibilidad-y-alcance-del-mvp), ninguna prenda estaba aprobada y apta; en ese estado el entrenador termina con un mensaje explícito y no fabrica un modelo de éxito.
