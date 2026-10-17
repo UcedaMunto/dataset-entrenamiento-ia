@@ -32,6 +32,7 @@ _nim_request_lock = threading.Lock()
 _last_nim_request_at: float | None = None
 CANCEL_REQUESTED = threading.Event()
 ANALYSIS_PROMPT_VERSION = "3"
+NIM_ANALYSIS_PROMPT_VERSION = "4"
 DEFAULT_PROMPT_INSTRUCTIONS = (
     "Determina si la imagen muestra claramente una sola prenda de la clase indicada. "
     "Si no corresponde a la clase, está corrupta, es ilegible, contiene principalmente "
@@ -335,8 +336,11 @@ def image_data_url(path: Path) -> str:
 def analysis_fingerprint(
     digest: str, category: str, provider: str, model: str, prompt: str = ""
 ) -> str:
+    prompt_version = (
+        NIM_ANALYSIS_PROMPT_VERSION if provider == "nim" else ANALYSIS_PROMPT_VERSION
+    )
     identity = json.dumps(
-        [digest, category, provider, model, ANALYSIS_PROMPT_VERSION, prompt],
+        [digest, category, provider, model, prompt_version, prompt],
         separators=(",", ":"),
     )
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()
@@ -414,16 +418,54 @@ def build_annotation_prompt(
     provider: str,
 ) -> str:
     if provider == "nim":
-        return build_prompt(
-            instructions,
-            known_type,
-            colors,
-            styles,
-            max_description_words=8,
-            max_attribute_values=2,
-            max_reason_words=8,
+        return "\n\n--- SIGUIENTE ETAPA ---\n\n".join(
+            build_nim_stage_prompts(instructions, known_type, colors, styles)
         )
     return build_prompt(instructions, known_type, colors, styles)
+
+
+def build_nim_stage_prompts(
+    instructions: str,
+    known_type: str,
+    colors: list[str],
+    styles: list[str],
+) -> list[str]:
+    color_values = ", ".join(json.dumps(value, ensure_ascii=False) for value in colors)
+    style_values = ", ".join(json.dumps(value, ensure_ascii=False) for value in styles)
+    context = (
+        f"Clase de prenda: {known_type}. "
+        "Analiza solo la prenda visible en la imagen."
+    )
+    return [
+        (
+            "ETAPA 1/3 — COLORES\n"
+            f"{context}\n"
+            f"Colores permitidos: [{color_values}].\n"
+            "Devuelve solo un objeto JSON con la clave colores y una lista de cero, uno "
+            'o dos valores exactos del catálogo, por ejemplo {"colores":["azul"]}. '
+            "No incluyas estilo, descripción, explicación ni otras claves."
+        ),
+        (
+            "ETAPA 2/3 — ESTILOS\n"
+            f"{context}\n"
+            f"Estilos permitidos: [{style_values}].\n"
+            "Devuelve solo un objeto JSON con la clave estilos y una lista de cero, uno "
+            'o dos valores exactos del catálogo, por ejemplo {"estilos":["casual"]}. '
+            "No incluyas colores, descripción, explicación ni otras claves."
+        ),
+        (
+            "ETAPA 3/3 — VALIDACIÓN Y DESCRIPCIÓN\n"
+            f"{context}\n"
+            "Instrucciones editables:\n"
+            f"{instructions.strip()}\n\n"
+            "Devuelve únicamente un objeto JSON completo y conciso con las claves apta "
+            "(booleano), motivo_descarte (texto de máximo 8 palabras) y descripcion "
+            "(texto de máximo 8 palabras; cadena vacía si apta es false). "
+            'Ejemplo: {"apta":true,"motivo_descarte":"","descripcion":"Camisa azul lisa"}. '
+            "No incluyas colores ni estilos; se combinarán desde las etapas anteriores. "
+            "Si apta es true, deja motivo_descarte vacío."
+        ),
+    ]
 
 
 def save_analysis(
@@ -433,7 +475,12 @@ def save_analysis(
     provider: str,
     model: str,
     annotation: dict,
+    source_id: str | None = None,
 ) -> None:
+    result = dict(annotation)
+    if source_id is not None:
+        result["_source_id"] = source_id
+        result["_source_relative_path"] = item["relative_path"].as_posix()
     connection.execute(
         """
         INSERT INTO analisis_imagen
@@ -447,9 +494,9 @@ def save_analysis(
             item["category"],
             provider,
             model,
-            ANALYSIS_PROMPT_VERSION,
+            NIM_ANALYSIS_PROMPT_VERSION if provider == "nim" else ANALYSIS_PROMPT_VERSION,
             "aceptada" if annotation["apta"] else "descartada",
-            json.dumps(annotation, ensure_ascii=False),
+            json.dumps(result, ensure_ascii=False),
         ),
     )
 
@@ -479,6 +526,182 @@ def wait_for_nim_request_slot() -> None:
         _last_nim_request_at = now
 
 
+def validate_nim_stage_result(result: dict, stage: str) -> None:
+    if stage in {"colores", "estilos"}:
+        values = result.get(stage)
+        if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
+            raise ValueError(f"La etapa {stage} debe devolver una lista de texto.")
+        return
+    if stage != "validación":
+        raise ValueError(f"Etapa NIM desconocida: {stage}.")
+    suitable = result.get("apta")
+    if not isinstance(suitable, bool):
+        raise ValueError("La etapa validación debe devolver apta como booleano.")
+    reason = result.get("motivo_descarte", "")
+    if reason is None and suitable:
+        reason = ""
+    if not isinstance(reason, str):
+        raise ValueError("La etapa validación debe devolver motivo_descarte como texto.")
+    if suitable:
+        description = result.get("descripcion")
+        if not isinstance(description, str) or not description.strip():
+            raise ValueError("La etapa validación debe devolver una descripción no vacía.")
+
+
+def request_nim_stage_json(
+    path: Path,
+    image_url: str,
+    api_key: str,
+    base_url: str,
+    model: str,
+    prompt: str,
+    stage: str,
+) -> dict:
+    payload = {
+        "model": model,
+        "temperature": 0,
+        "max_tokens": 256,
+        "response_format": {"type": "json_object"},
+        "messages": [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": image_url}},
+            ],
+        }],
+    }
+    for attempt in range(2):
+        wait_for_nim_request_slot()
+        if CANCEL_REQUESTED.is_set():
+            raise ProcessingCancelled("Detención solicitada antes de enviar la imagen.")
+        try:
+            response = requests.post(
+                f"{base_url}/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json=payload,
+                timeout=(15, 120),
+            )
+            response.raise_for_status()
+            body = response.json()
+            choice = body["choices"][0]
+            content = choice["message"]["content"]
+        except requests.HTTPError as error:
+            status = response.status_code
+            detail = response.text[:500].replace(api_key, "[REDACTED]")
+            raise RuntimeError(
+                f"El proveedor nim respondió HTTP {status} para el modelo {model}. "
+                f"Detalle: {detail or 'sin detalle'}"
+            ) from error
+        except requests.Timeout as error:
+            raise AnnotationTimeoutError(
+                f"Timeout al solicitar anotación al proveedor nim: {error}"
+            ) from error
+        except requests.RequestException as error:
+            raise RuntimeError(
+                f"Falló la solicitud de anotación al proveedor nim: {error}"
+            ) from error
+        except (ValueError, KeyError, IndexError, TypeError) as error:
+            raise RuntimeError(f"Respuesta inesperada del proveedor nim: {error}") from error
+
+        if not isinstance(content, str):
+            raise ValueError(
+                f"NIM no devolvió texto JSON para la etapa {stage} ({path.name})."
+            )
+        try:
+            result = parse_model_json(content)
+            validate_nim_stage_result(result, stage)
+            return result
+        except ValueError as error:
+            if attempt == 0:
+                if CANCEL_REQUESTED.is_set():
+                    raise ProcessingCancelled(
+                        "Detención solicitada; no se reintentará la respuesta JSON inválida."
+                    ) from error
+                payload["max_tokens"] = 512
+                payload["messages"][0]["content"][0]["text"] += (
+                    "\nReintento: responde solo con un objeto JSON válido, sin texto "
+                    "antes ni después y con las claves exactas indicadas."
+                )
+                print(
+                    f"JSON inválido de NIM en etapa {stage} "
+                    f"(caracteres={len(content)}); se reintentará una vez."
+                )
+                continue
+            raise ValueError(
+                f"NIM devolvió JSON inválido en etapa {stage} "
+                f"(caracteres={len(content)}): {error}"
+            ) from error
+    raise RuntimeError(f"Se agotaron los intentos de NIM para la etapa {stage}.")
+
+
+def _nim_catalog_values(result: dict, field: str, catalog: list[str]) -> list[str]:
+    values = result.get(field)
+    if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
+        raise ValueError(f"NIM no devolvió una lista de texto para {field}.")
+    distinct_values = set(values)
+    valid_values = sorted(value for value in distinct_values if value in catalog)
+    unknown_count = len(distinct_values) - len(valid_values)
+    if unknown_count:
+        print(
+            f"NIM propuso {unknown_count} valor(es) fuera del catálogo en {field}; "
+            "se ignoraron."
+        )
+    if len(valid_values) > 2:
+        print(f"NIM propuso más de dos valores en {field}; se conservaron solo dos.")
+    accepted = valid_values[:2]
+    return accepted
+
+
+def annotate_nim_image(
+    path: Path,
+    known_type: str,
+    api_key: str,
+    base_url: str,
+    model: str,
+    colors: list[str],
+    styles: list[str],
+    instructions: str,
+) -> dict:
+    image_url = image_data_url(path)
+    color_prompt, style_prompt, decision_prompt = build_nim_stage_prompts(
+        instructions, known_type, colors, styles
+    )
+    color_result = request_nim_stage_json(
+        path, image_url, api_key, base_url, model, color_prompt, "colores"
+    )
+    style_result = request_nim_stage_json(
+        path, image_url, api_key, base_url, model, style_prompt, "estilos"
+    )
+    decision = request_nim_stage_json(
+        path, image_url, api_key, base_url, model, decision_prompt, "validación"
+    )
+
+    suitable = decision.get("apta")
+    reason = decision.get("motivo_descarte", "")
+    if reason is None and suitable:
+        reason = ""
+    colors_found = _nim_catalog_values(color_result, "colores", colors)
+    styles_found = _nim_catalog_values(style_result, "estilos", styles)
+    if not suitable:
+        return {
+            "apta": False,
+            "motivo_descarte": " ".join(reason.strip().split()[:8])
+            or "La IA descartó la imagen.",
+            "colores": colors_found,
+            "estilos": styles_found,
+        }
+    description = decision.get("descripcion")
+    if not isinstance(description, str) or not description.strip():
+        raise ValueError("NIM no devolvió una descripción para la prenda apta.")
+    return {
+        "apta": True,
+        "motivo_descarte": "",
+        "descripcion": " ".join(description.split()[:8]),
+        "colores": colors_found,
+        "estilos": styles_found,
+    }
+
+
 def annotate_image(
     path: Path,
     known_type: str,
@@ -490,6 +713,10 @@ def annotate_image(
     styles: list[str],
     instructions: str = DEFAULT_PROMPT_INSTRUCTIONS,
 ) -> dict:
+    if provider == "nim":
+        return annotate_nim_image(
+            path, known_type, api_key, base_url, model, colors, styles, instructions
+        )
     prompt = build_annotation_prompt(
         instructions, known_type, colors, styles, provider
     )
@@ -915,7 +1142,13 @@ def command_ingest(args: argparse.Namespace, selected: dict) -> int:
                     if annotation is None:
                         continue
                     save_analysis(
-                        connection, fingerprint, item, args.provider, model, annotation
+                        connection,
+                        fingerprint,
+                        item,
+                        args.provider,
+                        model,
+                        annotation,
+                        source_id,
                     )
                     connection.commit()
                 if not annotation["apta"]:

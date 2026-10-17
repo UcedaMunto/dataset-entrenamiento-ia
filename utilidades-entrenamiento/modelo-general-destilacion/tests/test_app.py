@@ -528,7 +528,7 @@ class CurationPipelineTests(unittest.TestCase):
             app.requests, "post", side_effect=post_response
         ) as post:
             with self.assertRaisesRegex(
-                ValueError, r"Respuesta truncada por límite de tokens.*max_tokens=2048"
+                ValueError, r"NIM devolvió JSON inválido en etapa colores"
             ):
                 app.annotate_image(
                     self.image_path,
@@ -544,8 +544,8 @@ class CurationPipelineTests(unittest.TestCase):
         self.assertEqual(post.call_count, 2)
         payload = payloads[0]
         self.assertEqual(payload["response_format"], {"type": "json_object"})
-        self.assertEqual(payload["max_tokens"], 1024)
-        self.assertEqual(payloads[1]["max_tokens"], 2048)
+        self.assertEqual(payload["max_tokens"], 256)
+        self.assertEqual(payloads[1]["max_tokens"], 512)
 
     def test_nim_json_response_is_parsed(self):
         response = SimpleNamespace(
@@ -581,7 +581,15 @@ class CurationPipelineTests(unittest.TestCase):
             )
         self.assertTrue(result["apta"])
         self.assertEqual(result["descripcion"], "Camisa azul.")
+        self.assertEqual(post.call_count, 3)
         self.assertEqual(post.call_args.kwargs["json"]["response_format"]["type"], "json_object")
+        prompts = [
+            call.kwargs["json"]["messages"][0]["content"][0]["text"]
+            for call in post.call_args_list
+        ]
+        self.assertIn("ETAPA 1/3 — COLORES", prompts[0])
+        self.assertIn("ETAPA 2/3 — ESTILOS", prompts[1])
+        self.assertIn("ETAPA 3/3 — VALIDACIÓN Y DESCRIPCIÓN", prompts[2])
 
     def test_nim_prompt_and_result_limit_description_and_attributes(self):
         response = SimpleNamespace(
@@ -616,13 +624,78 @@ class CurationPipelineTests(unittest.TestCase):
                 ["casual", "deportivo", "formal"],
             )
 
-        prompt = post.call_args.kwargs["json"]["messages"][0]["content"][0]["text"]
-        self.assertIn("máximo 8 palabras", prompt)
-        self.assertIn("colores (lista de máximo 2)", prompt)
-        self.assertIn("estilos (lista de máximo 2)", prompt)
+        prompts = [
+            call.kwargs["json"]["messages"][0]["content"][0]["text"]
+            for call in post.call_args_list
+        ]
+        self.assertIn('"azul"', prompts[0])
+        self.assertIn('"rojo"', prompts[0])
+        self.assertIn('"casual"', prompts[1])
+        self.assertIn('"formal"', prompts[1])
+        self.assertIn("máximo 8 palabras", prompts[2])
         self.assertEqual(len(result["descripcion"].split()), 8)
         self.assertEqual(result["colores"], ["azul", "rojo"])
         self.assertEqual(result["estilos"], ["casual", "deportivo"])
+
+    def test_nim_retries_invalid_json_per_stage_and_combines_results(self):
+        contents = [
+            '{"colores":["azul"]} contenido extra',
+            '{"colores":["azul","inventado"]}',
+            '{"estilos":"casual"}',
+            '{"estilos":["casual"]}',
+            '{"apta":true,"motivo_descarte":"","descripcion":"Camisa azul casual"}',
+        ]
+        payloads = []
+        authorization_headers = []
+
+        def post_response(*args, **kwargs):
+            payloads.append(copy.deepcopy(kwargs["json"]))
+            authorization_headers.append(kwargs["headers"]["Authorization"])
+            content = contents.pop(0)
+            return SimpleNamespace(
+                status_code=200,
+                raise_for_status=lambda: None,
+                json=lambda: {"choices": [{
+                    "message": {"content": content},
+                    "finish_reason": "stop",
+                }]},
+            )
+
+        with patch.object(app, "wait_for_nim_request_slot"), patch.object(
+            app.requests, "post", side_effect=post_response
+        ):
+            result = app.annotate_image(
+                self.image_path,
+                "camisa",
+                "nim",
+                "test-secret",
+                "https://test.invalid/v1",
+                "meta/llama-3.2-11b-vision-instruct",
+                ["azul", "rojo"],
+                ["casual", "formal"],
+            )
+
+        self.assertTrue(result["apta"])
+        self.assertEqual(result["colores"], ["azul"])
+        self.assertEqual(result["estilos"], ["casual"])
+        self.assertEqual(len(payloads), 5)
+        self.assertTrue(all(header == "Bearer test-secret" for header in authorization_headers))
+        self.assertEqual(
+            [payload["max_tokens"] for payload in payloads], [256, 512, 256, 512, 256]
+        )
+        self.assertEqual(
+            [
+                payload["messages"][0]["content"][0]["text"].splitlines()[0]
+                for payload in payloads
+            ],
+            [
+                "ETAPA 1/3 — COLORES",
+                "ETAPA 1/3 — COLORES",
+                "ETAPA 2/3 — ESTILOS",
+                "ETAPA 2/3 — ESTILOS",
+                "ETAPA 3/3 — VALIDACIÓN Y DESCRIPCIÓN",
+            ],
+        )
 
     def test_nim_discard_reason_is_limited_to_eight_words(self):
         response = SimpleNamespace(
@@ -633,6 +706,8 @@ class CurationPipelineTests(unittest.TestCase):
                     "message": {
                         "content": json.dumps({
                             "apta": False,
+                            "colores": ["azul"],
+                            "estilos": ["casual"],
                             "motivo_descarte": (
                                 "Esta imagen no parece corresponder a camisa debido "
                                 "a la forma y el contexto."

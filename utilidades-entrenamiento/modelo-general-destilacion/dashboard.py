@@ -33,6 +33,9 @@ PROVIDERS = {
 JOB_LOCK = threading.Lock()
 JOB_PROCESSES: dict[str, subprocess.Popen] = {}
 JOB_STATES: dict[str, dict] = {}
+REJECTION_IMAGE_LOCK = threading.Lock()
+REJECTION_IMAGE_CACHE: dict[str, Path] = {}
+REJECTION_IMAGE_LOOKUP_MISSES: set[str] = set()
 
 
 def _empty_job(provider: str) -> dict:
@@ -497,6 +500,125 @@ def get_overview() -> dict:
     }
 
 
+def _stored_rejection_image_path(
+    digest: str, result: dict, sources: dict
+) -> Path | None:
+    source_id = result.get("_source_id")
+    relative_path = result.get("_source_relative_path")
+    if not isinstance(source_id, str) or not isinstance(relative_path, str):
+        return None
+    source = sources.get(source_id)
+    if not source or not source.get("allow_import") or source.get("benchmark_only"):
+        return None
+    source_root = (ROOT / "datos-crudos" / source["path"]).resolve()
+    image_path = (source_root / relative_path).resolve()
+    if (
+        not image_path.is_relative_to(source_root)
+        or not image_path.is_file()
+        or app.file_digest(image_path) != digest
+    ):
+        return None
+    return image_path
+
+
+def _resolve_rejection_image_paths(rows: list[dict]) -> dict[str, Path]:
+    resolved = {}
+    unresolved = set()
+    sources = app.load_sources()
+    for row in rows:
+        digest = row["sha256"]
+        result = row["result"]
+        image_path = _stored_rejection_image_path(digest, result, sources)
+        if image_path is not None:
+            resolved[digest] = image_path
+        else:
+            unresolved.add(digest)
+
+    with REJECTION_IMAGE_LOCK:
+        unresolved -= REJECTION_IMAGE_CACHE.keys()
+        unresolved -= REJECTION_IMAGE_LOOKUP_MISSES
+        if unresolved:
+            for source in sources.values():
+                if not source.get("allow_import") or source.get("benchmark_only"):
+                    continue
+                source_root = (ROOT / "datos-crudos" / source["path"]).resolve()
+                if not source_root.is_dir():
+                    continue
+                for image_path in source_root.rglob("*"):
+                    if (
+                        not image_path.is_file()
+                        or image_path.suffix.lower() not in app.IMAGE_EXTENSIONS
+                        or image_path.stat().st_size > app.MAX_IMAGE_BYTES
+                    ):
+                        continue
+                    digest = app.file_digest(image_path)
+                    if digest in unresolved:
+                        REJECTION_IMAGE_CACHE[digest] = image_path.resolve()
+                        unresolved.remove(digest)
+                        if not unresolved:
+                            break
+                if not unresolved:
+                    break
+            REJECTION_IMAGE_LOOKUP_MISSES.update(unresolved)
+        for row in rows:
+            digest = row["sha256"]
+            if digest in REJECTION_IMAGE_CACHE:
+                resolved[digest] = REJECTION_IMAGE_CACHE[digest]
+    return resolved
+
+
+def get_recent_rejections(provider: str) -> list[dict]:
+    if provider not in {"nim", "deepseek"}:
+        raise ValueError("Proveedor de descartes no válido.")
+    with connect_database() as connection:
+        rows = connection.execute(
+            """
+            SELECT sha256, categoria, modelo, fecha_analisis, resultado_json
+            FROM analisis_imagen
+            WHERE estado = 'descartada' AND proveedor = ?
+            ORDER BY fecha_analisis DESC
+            LIMIT 20
+            """,
+            (provider,),
+        ).fetchall()
+    records = []
+    for row in rows:
+        try:
+            result = json.loads(row["resultado_json"])
+        except json.JSONDecodeError as error:
+            raise ValueError(
+                f"El análisis descartado de {provider} contiene un resultado inválido."
+            ) from error
+        if not isinstance(result, dict):
+            raise ValueError(f"El análisis descartado de {provider} no es un objeto JSON.")
+        reason = result.get("motivo_descarte", "Sin motivo registrado.")
+        if not isinstance(reason, str):
+            reason = "Sin motivo registrado."
+        records.append({
+            "sha256": row["sha256"],
+            "categoria": row["categoria"],
+            "modelo": row["modelo"],
+            "fecha": row["fecha_analisis"],
+            "motivo_descarte": reason,
+            "result": result,
+        })
+    image_paths = _resolve_rejection_image_paths(records)
+    return [{
+        key: value
+        for key, value in {
+            "sha256": row["sha256"],
+            "categoria": row["categoria"],
+            "modelo": row["modelo"],
+            "fecha": row["fecha"],
+            "motivo_descarte": row["motivo_descarte"],
+            "imagen_url": (
+                f"/api/rejected-image/{row['sha256']}"
+                if row["sha256"] in image_paths else None
+            ),
+        }.items()
+    } for row in records]
+
+
 class DashboardHandler(BaseHTTPRequestHandler):
     server_version = "DatasetDashboard/1.0"
 
@@ -555,6 +677,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if path == "/api/overview":
                 self._send_json(200, get_overview())
                 return
+            match = re.fullmatch(r"/api/rejections/(nim|deepseek)", path)
+            if match:
+                self._send_json(200, {"rejections": get_recent_rejections(match.group(1))})
+                return
             if path == "/api/jobs":
                 self._send_json(200, get_job_status())
                 return
@@ -564,6 +690,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
             match = re.fullmatch(r"/api/image/([0-9]+)", path)
             if match:
                 self._send_image(int(match.group(1)))
+                return
+            match = re.fullmatch(r"/api/rejected-image/([0-9a-f]{64})", path)
+            if match:
+                self._send_rejected_image(match.group(1))
                 return
             self._send_json(404, {"error": "Ruta no encontrada."})
         except (OSError, sqlite3.Error, ValueError, RuntimeError) as error:
@@ -593,6 +723,44 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if mime_type is None:
             self._send_json(415, {"error": "Formato de imagen no compatible."})
             return
+        self.send_response(200)
+        self.send_header("Content-Type", mime_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "private, max-age=60")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_rejected_image(self, digest: str) -> None:
+        with connect_database() as connection:
+            row = connection.execute(
+                """
+                SELECT sha256, resultado_json FROM analisis_imagen
+                WHERE sha256 = ? AND estado = 'descartada'
+                ORDER BY fecha_analisis DESC LIMIT 1
+                """,
+                (digest,),
+            ).fetchone()
+        if row is None:
+            self._send_json(404, {"error": "Imagen descartada no encontrada."})
+            return
+        try:
+            result = json.loads(row["resultado_json"])
+        except json.JSONDecodeError as error:
+            raise ValueError("El resultado del análisis descartado no es JSON válido.") from error
+        image_path = _resolve_rejection_image_paths([{
+            "sha256": row["sha256"],
+            "result": result if isinstance(result, dict) else {},
+        }]).get(digest)
+        if image_path is None:
+            self._send_json(404, {"error": "No se encontró la imagen fuente del descarte."})
+            return
+        with app.Image.open(image_path) as source:
+            mime_type = app.IMAGE_MIME_TYPES.get(source.format)
+        if mime_type is None:
+            self._send_json(415, {"error": "Formato de imagen no compatible."})
+            return
+        body = image_path.read_bytes()
         self.send_response(200)
         self.send_header("Content-Type", mime_type)
         self.send_header("Content-Length", str(len(body)))

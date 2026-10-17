@@ -31,6 +31,8 @@ class DashboardTests(unittest.TestCase):
             patch.object(dashboard, "DATABASE", self.database),
             patch.object(dashboard, "DATASET_ROOT", self.root),
             patch.object(dashboard, "ENV_FILE", self.env),
+            patch.object(dashboard, "REJECTION_IMAGE_CACHE", {}),
+            patch.object(dashboard, "REJECTION_IMAGE_LOOKUP_MISSES", set()),
         ]
         for item in self.patches:
             item.start()
@@ -75,6 +77,65 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(data["recent_images"][0]["sugerencias_ia"]["colores"], ["azul"])
         self.assertTrue(data["providers"]["nim"])
         self.assertNotIn("do-not-return-this-secret", json.dumps(data))
+
+    def test_recent_rejections_include_source_images_for_legacy_and_new_records(self):
+        source_root = self.root / "datos-crudos" / "fixture"
+        source_root.mkdir(parents=True)
+        image_path = source_root / "rejected.png"
+        dashboard.app.Image.new("RGB", (12, 12), (20, 60, 140)).save(image_path)
+        digest = dashboard.app.file_digest(image_path)
+        with sqlite3.connect(self.database) as connection:
+            connection.executemany(
+                """
+                INSERT INTO analisis_imagen
+                    (huella_analisis, sha256, categoria, proveedor, modelo,
+                     version_prompt, estado, resultado_json)
+                VALUES (?, ?, 'camisa', ?, 'vision-test', '4', 'descartada', ?)
+                """,
+                [
+                    (
+                        "nim-rejection",
+                        digest,
+                        "nim",
+                        json.dumps({
+                            "apta": False,
+                            "motivo_descarte": "No corresponde a la clase.",
+                            "_source_id": "fixture",
+                            "_source_relative_path": "rejected.png",
+                        }),
+                    ),
+                    (
+                        "deepseek-rejection",
+                        digest,
+                        "deepseek",
+                        json.dumps({
+                            "apta": False,
+                            "motivo_descarte": "Imagen fuera de clase.",
+                        }),
+                    ),
+                ],
+            )
+        with patch.object(dashboard, "ROOT", self.root), patch.object(
+            dashboard.app,
+            "load_sources",
+            return_value={"fixture": {"path": "fixture", "allow_import": True}},
+        ):
+            nim_results = dashboard.get_recent_rejections("nim")
+            deepseek_results = dashboard.get_recent_rejections("deepseek")
+            handler = object.__new__(dashboard.DashboardHandler)
+            handler.wfile = BytesIO()
+            handler.send_response = unittest.mock.Mock()
+            handler.send_header = unittest.mock.Mock()
+            handler.end_headers = unittest.mock.Mock()
+            handler._send_json = unittest.mock.Mock()
+            handler._send_rejected_image(digest)
+
+        self.assertEqual(len(nim_results), 1)
+        self.assertEqual(nim_results[0]["motivo_descarte"], "No corresponde a la clase.")
+        self.assertEqual(nim_results[0]["imagen_url"], f"/api/rejected-image/{digest}")
+        self.assertEqual(deepseek_results[0]["imagen_url"], f"/api/rejected-image/{digest}")
+        handler.send_response.assert_called_once_with(200)
+        self.assertEqual(handler.wfile.getvalue(), image_path.read_bytes())
 
     def test_prompt_and_property_updates_are_persisted(self):
         handler = object.__new__(dashboard.DashboardHandler)

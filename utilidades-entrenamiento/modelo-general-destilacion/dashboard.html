@@ -27,6 +27,9 @@
     .cards { display:grid; gap:12px }
     .item { display:grid; grid-template-columns:120px 1fr; gap:15px; border-top:1px solid var(--line); padding:14px 0 }
     .item img { width:120px; height:120px; object-fit:contain; background:#0e131a; border-radius:8px }
+    .tabs { display:flex; gap:8px; flex-wrap:wrap; margin:14px 0 4px }
+    button.tab { padding:7px 12px; background:transparent }
+    button.tab[aria-selected="true"] { border-color:var(--accent); color:var(--accent); background:#14644f33 }
     .item h3 { margin-bottom:4px; font-size:16px } .pill { display:inline-block; border:1px solid var(--line); border-radius:20px; padding:2px 9px; color:var(--muted); font-size:12px; margin:2px 4px 2px 0 }
     .props { margin:7px 0 } .empty { color:var(--muted); padding:20px 0 }
     .job-panel { margin-bottom:18px; border-color:#218c6d } .job-grid { display:grid; grid-template-columns:2fr 1fr; gap:12px; align-items:end; margin-top:14px }
@@ -89,8 +92,13 @@
       <div class="type-list" id="typeCounts"></div>
     </section>
     <section class="panel">
-      <div class="section-head"><h2>Últimas 5 prendas incorporadas</h2><span class="muted">Propiedades confirmadas y sugerencias de IA</span></div>
-      <div class="cards" id="recent"></div>
+      <div class="section-head"><h2>Prendas incorporadas y descartadas</h2><span class="muted">Hasta 20 imágenes descartadas recientes por proveedor</span></div>
+      <div class="tabs" role="tablist" aria-label="Resultados de curación">
+        <button id="tabIncorporated" class="tab" role="tab" aria-selected="true" aria-controls="recent">Incorporadas</button>
+        <button id="tabNimRejected" class="tab" role="tab" aria-selected="false" aria-controls="recent">Descartadas · NVIDIA NIM</button>
+        <button id="tabDeepseekRejected" class="tab" role="tab" aria-selected="false" aria-controls="recent">Descartadas · DeepSeek</button>
+      </div>
+      <div class="cards" id="recent" role="tabpanel" aria-live="polite"></div>
     </section>
     <p id="status" role="status" class="muted" style="margin-top:14px"></p>
   </main>
@@ -146,6 +154,9 @@
       falda:"Falda", pantalon:"Pantalón", short:"Short", sueter:"Suéter", vestido:"Vestido"
     };
     const providerNames = { nim:"NVIDIA NIM", deepseek:"DeepSeek", openai:"OpenAI", none:"Sin IA" };
+    let activeGarmentTab="incorporated";
+    const rejectionCache={};
+    const rejectionRequests={};
     async function request(path, options={}) {
       const response = await fetch(path, {cache:"no-store", ...options});
       const data = await response.json();
@@ -181,6 +192,59 @@
         body.append(pills); card.append(body); root.append(card);
       }
     }
+    function renderRejected(items) {
+      const root=$("recent"); root.replaceChildren();
+      if (!items.length) {
+        const empty=document.createElement("p"); empty.className="empty";
+        empty.textContent="No hay imágenes descartadas registradas para este proveedor.";
+        root.append(empty); return;
+      }
+      for (const item of items) {
+        const card=document.createElement("article"); card.className="item";
+        if(item.imagen_url) {
+          const image=document.createElement("img"); image.src=item.imagen_url;
+          image.alt=`Imagen descartada de ${categoryNames[item.categoria] || item.categoria}`;
+          image.loading="lazy"; card.append(image);
+        } else {
+          const missing=document.createElement("div"); missing.className="empty";
+          missing.textContent="Imagen fuente no encontrada"; card.append(missing);
+        }
+        const body=document.createElement("div");
+        const title=document.createElement("h3");
+        title.textContent=`${categoryNames[item.categoria] || item.categoria} · Descartada`;
+        body.append(title);
+        const meta=document.createElement("div"); meta.className="muted";
+        meta.textContent=`${item.fecha} · ${providerNames[activeGarmentTab] || activeGarmentTab} · ${item.modelo}`;
+        body.append(meta);
+        const reason=document.createElement("p"); reason.textContent=item.motivo_descarte;
+        reason.style.margin="8px 0"; body.append(reason);
+        card.append(body); root.append(card);
+      }
+    }
+    async function selectGarmentTab(tab) {
+      activeGarmentTab=tab;
+      for(const [id,name] of [["tabIncorporated","incorporated"],["tabNimRejected","nim"],["tabDeepseekRejected","deepseek"]]) {
+        $(id).setAttribute("aria-selected",String(name===tab));
+      }
+      if(tab==="incorporated") { if(latestData) renderRecent(latestData.recent_images); return; }
+      if(rejectionCache[tab]) { renderRejected(rejectionCache[tab]); return; }
+      const root=$("recent"); root.replaceChildren();
+      const loading=document.createElement("p"); loading.className="empty";
+      loading.textContent="Buscando los descartes recientes y sus imágenes…"; root.append(loading);
+      if(rejectionRequests[tab]) return;
+      rejectionRequests[tab]=true;
+      try {
+        const data=await request(`/api/rejections/${tab}`);
+        rejectionCache[tab]=data.rejections;
+        if(activeGarmentTab===tab) renderRejected(data.rejections);
+      } catch(error) {
+        if(activeGarmentTab===tab) {
+          root.replaceChildren();
+          const message=document.createElement("p"); message.className="error";
+          message.textContent=error.message; root.append(message);
+        }
+      } finally { delete rejectionRequests[tab]; }
+    }
     function render(data) {
       latestData=data;
       const sourceSelect=$("sourceSelect"), previousSource=sourceSelect.value;
@@ -204,7 +268,8 @@
       $("providerStatus").textContent=`Activo para nuevas ejecuciones: ${providerNames[data.selected_provider] || data.selected_provider}. Claves configuradas: ${configured.join(", ") || "ninguna"}.`;
       const list=$("typeCounts"); list.replaceChildren();
       for (const [code,name] of Object.entries(categoryNames)) { const row=document.createElement("div"); row.className="type"; const label=document.createElement("span"); label.textContent=name; const count=document.createElement("b"); count.textContent=(data.counts_by_type[code]||0).toLocaleString("es-MX"); row.append(label,count); list.append(row); }
-      renderRecent(data.recent_images);
+      if(activeGarmentTab==="incorporated") renderRecent(data.recent_images);
+      else if(rejectionCache[activeGarmentTab]) renderRejected(rejectionCache[activeGarmentTab]);
     }
     async function refresh() { try { render(await request("/api/overview")); setStatus("status",`Actualizado ${new Date().toLocaleTimeString("es-MX")}`); } catch(error) { setStatus("status",error.message,"error"); } }
     const providerCheckboxes = {nim:"providerNim",deepseek:"providerDeepseek",none:"providerNone"};
@@ -257,6 +322,9 @@
     function closeDialogs() { document.querySelectorAll("dialog").forEach(dialog=>dialog.close()); }
     document.querySelectorAll(".close").forEach(button=>button.addEventListener("click",closeDialogs));
     $("refreshButton").addEventListener("click",refresh);
+    $("tabIncorporated").addEventListener("click",()=>selectGarmentTab("incorporated"));
+    $("tabNimRejected").addEventListener("click",()=>selectGarmentTab("nim"));
+    $("tabDeepseekRejected").addEventListener("click",()=>selectGarmentTab("deepseek"));
     ["providerNim","providerDeepseek","providerNone"].forEach(id=>$(id).addEventListener("change",syncRemoteConsent));
     $("ingestForm").addEventListener("submit",async(event)=>{
       event.preventDefault();
@@ -287,7 +355,7 @@
       }
     }
     $("promptButton").addEventListener("click",async()=>{ try { latestData=await request("/api/overview"); $("promptText").value=latestData.prompt_instructions; $("promptPreview").textContent=latestData.prompt_preview; setStatus("promptStatus",""); openDialog("promptModal"); } catch(e) { setStatus("status",e.message,"error"); } });
-    $("promptText").addEventListener("input",()=>{ if(latestData) { const marker="\n\nInstrucciones:\n"; const start=latestData.prompt_preview.indexOf(marker); const end=latestData.prompt_preview.indexOf("\n\nDevuelve solo JSON",start); $("promptPreview").textContent=`${latestData.prompt_preview.slice(0,start)}${marker}${$("promptText").value}${latestData.prompt_preview.slice(end)}`; } });
+    $("promptText").addEventListener("input",()=>{ if(latestData) { const preview=latestData.prompt_preview; const markers=["Instrucciones editables:\n","Instrucciones:\n"]; for(const marker of markers) { const start=preview.indexOf(marker); const end=preview.indexOf("\n\nDevuelve únicamente",start); if(start>=0&&end>=0) { $("promptPreview").textContent=`${preview.slice(0,start+marker.length)}${$("promptText").value}${preview.slice(end)}`; break; } } } });
     $("promptForm").addEventListener("submit",async(event)=>{ event.preventDefault(); try { await request("/api/prompt",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({instructions:$("promptText").value})}); setStatus("promptStatus","Prompt guardado.","success"); await refresh(); } catch(e) { setStatus("promptStatus",e.message,"error"); } });
     $("propertiesButton").addEventListener("click",async()=>{ try { latestData=await request("/api/overview"); $("colorsText").value=latestData.properties.color.join("\n"); $("stylesText").value=latestData.properties.estilo.join("\n"); setStatus("propertiesStatus",""); openDialog("propertiesModal"); } catch(e) { setStatus("status",e.message,"error"); } });
     const lines=(value)=>value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
