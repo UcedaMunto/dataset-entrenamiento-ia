@@ -20,6 +20,7 @@ Cobertura:
 - Carpetas sin clase canónica y archivos por encima de 200.000 bytes no entran en el plan.
 - La imagen se envía sin modificar sus bytes y el MIME coincide con su formato real.
 - El prompt guardado y los vocabularios de propiedad quedan disponibles para el siguiente proceso de curación.
+- Ambos proveedores pueden proponer estilos y temporadas nuevos; los valores se fusionan sin duplicados en el catálogo incluso si la imagen se descarta. Los colores no admiten valores fuera de su catálogo.
 
 Resultado esperado: todos los tests pasan; ningún test conoce ni carga API keys.
 
@@ -65,9 +66,10 @@ El curador aplica una separación mínima de 3 segundos entre inicios de peticio
 - Si la llamada API funciona pero falla la escritura de una imagen aceptada, el resultado del análisis permanece cacheado para reintentar la importación sin volver a pagar la inferencia.
 - Una respuesta inválida no genera análisis cacheado; la imagen se omite y el proceso prueba las siguientes del lote.
 - DeepSeek solicita `response_format=json_object`, 1.024 tokens iniciales y un reintento con 2.048 cuando el contenido está vacío o truncado; además envía `thinking: {type: disabled}` y el prompt incluye JSON y un ejemplo.
-- NIM envía tres solicitudes por imagen, en orden: colores, estilos, validación/descripción. Cada etapa solicita JSON de hasta 256 tokens y reintenta una vez con 512 ante JSON inválido; comprobar que se combinan las tres respuestas, los inicios se separan al menos 3 segundos y una detención impide enviar las etapas siguientes.
+- NIM envía cuatro solicitudes por imagen, en orden: colores, estilos, temporadas y validación/descripción. Cada etapa solicita JSON de hasta 256 tokens y reintenta una vez con 512 ante JSON inválido; comprobar que se combinan las cuatro respuestas, los inicios se separan al menos 3 segundos y una detención impide enviar las etapas siguientes.
 - Con DeepSeek configurado, un descarte NIM debe iniciar una evaluación DeepSeek usando su propio fingerprint/cache. Si DeepSeek acepta, importar con proveedor/modelo DeepSeek; si también descarta, conservar ambos análisis y no importar. Sin clave DeepSeek, mantener el descarte NIM y mostrarlo explícitamente. Si ambos proveedores se seleccionan en paralelo, comprobar que no se dispara una llamada fallback redundante desde el proceso NIM.
-- NIM debe pedir un máximo de 8 palabras en descripción y motivo de descarte, y máximo 2 colores y 2 estilos. Verificar que valores fuera del catálogo se ignoran, no invalidan la imagen, y los resultados combinados conservan solo dos valores válidos. DeepSeek mantiene descripción de hasta 12 palabras y hasta 3 colores/estilos.
+- NIM debe realizar cuatro etapas: colores, estilos, temporadas y validación/descripción. Debe pedir un máximo de 8 palabras en descripción y motivo de descarte, y máximo 2 valores por propiedad. Verificar que colores fuera del catálogo se ignoran, estilos/temporadas nuevos se conservan, y el resultado combinado respeta esos límites. DeepSeek debe conservar estilos/temporadas nuevos, restringir colores al catálogo y mantener descripción de hasta 12 palabras y hasta 3 valores por lista.
+- Tras responder una anotación, comprobar que estilo/temporada nuevos se guardan en `catalogo_propiedad`; en imágenes incorporadas, las sugerencias quedan también en `atributos_sugeridos`. El catálogo de color no cambia. El siguiente análisis debe recibir el catálogo actualizado en su prompt.
 - Mocks de ambos proveedores: una primera respuesta vacía/truncada seguida de JSON válido debe devolver anotación válida y demostrar el aumento de tokens; dos respuestas incompletas deben omitir la imagen sin guardarla y continuar el lote.
 - Dos inicios consecutivos de solicitudes NIM se separan como mínimo 3 segundos. Ante timeout, el proceso espera un intervalo aleatorio entre 30 y 120 segundos y reintenta la misma imagen exactamente una vez; si el segundo intento también expira, la omite y pasa a la siguiente muestra. Verificar orden de imágenes, espera y que solo se persista una decisión válida.
 - Con hashes ya importados al inicio del inventario, un límite de lote pequeño debe saltarlos antes de contar candidatos; el mismo tamaño de lote debe avanzar hasta llenar el cupo con imágenes nuevas. El resumen debe reportar las duplicadas omitidas antes de IA.
@@ -91,6 +93,7 @@ Comprobar:
 - La estimación queda como “sin datos” con menos de dos marcas de tiempo medibles y pasa a duración cuando existe una tasa válida.
 - Guardar un prompt cambia la vista previa y el valor persistido en `pipeline_config`; el prompt nuevo cambia la huella del análisis.
 - Cambiar vocabularios modifica `catalogo_propiedad`, y el prompt siguiente contiene esos valores.
+- El modal de propiedades expone y permite editar colores, estilos y temporadas. Los nuevos valores de estilo/temporada detectados aparecen allí aunque se haya descartado la imagen.
 - El modal de credenciales indica presencia de claves sin revelar sus valores. Reemplazar una key debe conservar campos vacíos, actualizar `.env` con modo 600 y no incluir el secreto en respuestas o logs.
 - Solicitudes POST con host/origen ajeno son rechazadas; las claves no existen en SQLite.
 - El servicio está publicado en `127.0.0.1`, no en `0.0.0.0` del host.

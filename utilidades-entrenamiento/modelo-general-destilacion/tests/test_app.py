@@ -111,6 +111,7 @@ class CurationPipelineTests(unittest.TestCase):
                     (1, "color", json.dumps(["azul"])),
                     (2, "estilo", json.dumps(["casual"])),
                     (3, "tipo_prenda", json.dumps(["camisa"])),
+                    (4, "temporada", json.dumps(["invierno"])),
                 ],
             )
         self.env_patch = patch.dict(os.environ, {"DATASET_ROOT": str(self.dataset_root)})
@@ -162,9 +163,11 @@ class CurationPipelineTests(unittest.TestCase):
             "descripcion": "Camisa azul.",
             "colores": ["azul"],
             "estilos": [],
+            "temporadas": [],
         }
         prompt = app.build_annotation_prompt(
-            app.DEFAULT_PROMPT_INSTRUCTIONS, "camisa", ["azul"], ["casual"], "nim"
+            app.DEFAULT_PROMPT_INSTRUCTIONS, "camisa", ["azul"], ["casual"], "nim",
+            ["invierno"],
         )
         fingerprint = app.analysis_fingerprint(
             self.digest, "camisa", "nim", "test-model", prompt
@@ -184,10 +187,58 @@ class CurationPipelineTests(unittest.TestCase):
             self.assertEqual(connection.execute("SELECT etiqueta_fuente FROM prenda_imagen").fetchone()[0], "Polo")
             self.assertEqual(connection.execute("SELECT estado_revision FROM descripcion_prenda").fetchone()[0], "pendiente")
 
+    def test_new_styles_and_seasons_are_added_but_colors_stay_restricted(self):
+        result = {
+            "apta": True,
+            "motivo_descarte": "",
+            "descripcion": "Camisa azul.",
+            "colores": ["azul"],
+            "estilos": ["bohemio"],
+            "temporadas": ["otoño"],
+        }
+        with patch.object(app, "annotate_image", return_value=result):
+            self.assertEqual(self.run_ingest(), 0)
+
+        with sqlite3.connect(self.database) as connection:
+            catalogs = {
+                code: json.loads(values)
+                for code, values in connection.execute(
+                    "SELECT codigo, valores_permitidos FROM catalogo_propiedad"
+                )
+            }
+        self.assertIn("bohemio", catalogs["estilo"])
+        self.assertIn("otoño", catalogs["temporada"])
+        self.assertEqual(catalogs["color"], ["azul"])
+
+    def test_rejected_analysis_also_adds_reported_styles_and_seasons(self):
+        result = {
+            "apta": False,
+            "motivo_descarte": "No corresponde a camisa.",
+            "estilos": ["bohemio"],
+            "temporadas": ["otoño"],
+        }
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}), patch.object(
+            app, "annotate_image", return_value=result
+        ):
+            self.assertEqual(self.run_ingest(), 0)
+
+        with sqlite3.connect(self.database) as connection:
+            styles = json.loads(connection.execute(
+                "SELECT valores_permitidos FROM catalogo_propiedad WHERE codigo='estilo'"
+            ).fetchone()[0])
+            seasons = json.loads(connection.execute(
+                "SELECT valores_permitidos FROM catalogo_propiedad WHERE codigo='temporada'"
+            ).fetchone()[0])
+            imported = connection.execute("SELECT COUNT(*) FROM prenda").fetchone()[0]
+        self.assertIn("bohemio", styles)
+        self.assertIn("otoño", seasons)
+        self.assertEqual(imported, 0)
+
     def test_cached_rejection_is_not_sent_or_imported_again(self):
         result = {"apta": False, "motivo_descarte": "No corresponde a camisa."}
         prompt = app.build_annotation_prompt(
-            app.DEFAULT_PROMPT_INSTRUCTIONS, "camisa", ["azul"], ["casual"], "nim"
+            app.DEFAULT_PROMPT_INSTRUCTIONS, "camisa", ["azul"], ["casual"], "nim",
+            ["invierno"],
         )
         fingerprint = app.analysis_fingerprint(
             self.digest, "camisa", "nim", "test-model", prompt
@@ -211,6 +262,7 @@ class CurationPipelineTests(unittest.TestCase):
             "motivo_descarte": "No corresponde a camisa.",
             "colores": ["azul"],
             "estilos": ["casual"],
+            "temporadas": [],
         }
         deepseek_acceptance = {
             "apta": True,
@@ -218,6 +270,7 @@ class CurationPipelineTests(unittest.TestCase):
             "descripcion": "Camisa azul casual.",
             "colores": ["azul"],
             "estilos": ["casual"],
+            "temporadas": [],
         }
         with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-deepseek-key"}), patch.object(
             app, "annotate_image", side_effect=[nim_rejection, deepseek_acceptance]
@@ -247,12 +300,14 @@ class CurationPipelineTests(unittest.TestCase):
             "motivo_descarte": "No corresponde a camisa.",
             "colores": ["azul"],
             "estilos": ["casual"],
+            "temporadas": [],
         }
         deepseek_rejection = {
             "apta": False,
             "motivo_descarte": "No es una camisa.",
             "colores": ["azul"],
             "estilos": ["casual"],
+            "temporadas": [],
         }
         with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-deepseek-key"}), patch.object(
             app, "annotate_image", side_effect=[nim_rejection, deepseek_rejection]
@@ -278,6 +333,7 @@ class CurationPipelineTests(unittest.TestCase):
             "descripcion": "Camisa azul.",
             "colores": ["azul"],
             "estilos": [],
+            "temporadas": [],
         }
         with patch.object(app, "annotate_image", return_value=result) as annotate:
             self.assertEqual(self.run_ingest(), 0)
@@ -331,6 +387,7 @@ class CurationPipelineTests(unittest.TestCase):
                             "descripcion": "Camisa azul.",
                             "colores": ["azul"],
                             "estilos": ["casual"],
+                            "temporadas": ["verano"],
                         })
                     },
                     "finish_reason": "stop",
@@ -638,6 +695,7 @@ class CurationPipelineTests(unittest.TestCase):
                             "descripcion": "Camisa azul.",
                             "colores": ["azul"],
                             "estilos": ["casual"],
+                            "temporadas": ["verano"],
                         })
                     },
                     "finish_reason": "stop",
@@ -659,15 +717,17 @@ class CurationPipelineTests(unittest.TestCase):
             )
         self.assertTrue(result["apta"])
         self.assertEqual(result["descripcion"], "Camisa azul.")
-        self.assertEqual(post.call_count, 3)
+        self.assertEqual(post.call_count, 4)
         self.assertEqual(post.call_args.kwargs["json"]["response_format"]["type"], "json_object")
         prompts = [
             call.kwargs["json"]["messages"][0]["content"][0]["text"]
             for call in post.call_args_list
         ]
-        self.assertIn("ETAPA 1/3 — COLORES", prompts[0])
-        self.assertIn("ETAPA 2/3 — ESTILOS", prompts[1])
-        self.assertIn("ETAPA 3/3 — VALIDACIÓN Y DESCRIPCIÓN", prompts[2])
+        self.assertIn("ETAPA 1/4 — COLORES", prompts[0])
+        self.assertIn("ETAPA 2/4 — ESTILOS", prompts[1])
+        self.assertIn("ETAPA 3/4 — TEMPORADAS", prompts[2])
+        self.assertIn("ETAPA 4/4 — VALIDACIÓN Y DESCRIPCIÓN", prompts[3])
+        self.assertEqual(result["temporadas"], ["verano"])
 
     def test_nim_prompt_and_result_limit_description_and_attributes(self):
         response = SimpleNamespace(
@@ -681,7 +741,8 @@ class CurationPipelineTests(unittest.TestCase):
                             "motivo_descarte": "",
                             "descripcion": "Camisa de algodón azul lisa para uso diario casual.",
                             "colores": ["verde", "azul", "rojo"],
-                            "estilos": ["formal", "casual", "deportivo"],
+                            "estilos": ["minimalista", "formal", "casual"],
+                            "temporadas": ["primavera", "verano", "invierno"],
                         })
                     },
                     "finish_reason": "stop",
@@ -710,10 +771,11 @@ class CurationPipelineTests(unittest.TestCase):
         self.assertIn('"rojo"', prompts[0])
         self.assertIn('"casual"', prompts[1])
         self.assertIn('"formal"', prompts[1])
-        self.assertIn("máximo 8 palabras", prompts[2])
+        self.assertIn("máximo 8 palabras", prompts[3])
         self.assertEqual(len(result["descripcion"].split()), 8)
         self.assertEqual(result["colores"], ["azul", "rojo"])
-        self.assertEqual(result["estilos"], ["casual", "deportivo"])
+        self.assertEqual(result["estilos"], ["minimalista", "formal"])
+        self.assertEqual(result["temporadas"], ["primavera", "verano"])
 
     def test_nim_retries_invalid_json_per_stage_and_combines_results(self):
         contents = [
@@ -721,6 +783,7 @@ class CurationPipelineTests(unittest.TestCase):
             '{"colores":["azul","inventado"]}',
             '{"estilos":"casual"}',
             '{"estilos":["casual"]}',
+            '{"temporadas":["invierno"]}',
             '{"apta":true,"motivo_descarte":"","descripcion":"Camisa azul casual"}',
         ]
         payloads = []
@@ -756,10 +819,12 @@ class CurationPipelineTests(unittest.TestCase):
         self.assertTrue(result["apta"])
         self.assertEqual(result["colores"], ["azul"])
         self.assertEqual(result["estilos"], ["casual"])
-        self.assertEqual(len(payloads), 5)
+        self.assertEqual(result["temporadas"], ["invierno"])
+        self.assertEqual(len(payloads), 6)
         self.assertTrue(all(header == "Bearer test-secret" for header in authorization_headers))
         self.assertEqual(
-            [payload["max_tokens"] for payload in payloads], [256, 512, 256, 512, 256]
+            [payload["max_tokens"] for payload in payloads],
+            [256, 512, 256, 512, 256, 256],
         )
         self.assertEqual(
             [
@@ -767,11 +832,12 @@ class CurationPipelineTests(unittest.TestCase):
                 for payload in payloads
             ],
             [
-                "ETAPA 1/3 — COLORES",
-                "ETAPA 1/3 — COLORES",
-                "ETAPA 2/3 — ESTILOS",
-                "ETAPA 2/3 — ESTILOS",
-                "ETAPA 3/3 — VALIDACIÓN Y DESCRIPCIÓN",
+                "ETAPA 1/4 — COLORES",
+                "ETAPA 1/4 — COLORES",
+                "ETAPA 2/4 — ESTILOS",
+                "ETAPA 2/4 — ESTILOS",
+                "ETAPA 3/4 — TEMPORADAS",
+                "ETAPA 4/4 — VALIDACIÓN Y DESCRIPCIÓN",
             ],
         )
 
@@ -786,6 +852,7 @@ class CurationPipelineTests(unittest.TestCase):
                             "apta": False,
                             "colores": ["azul"],
                             "estilos": ["casual"],
+                            "temporadas": [],
                             "motivo_descarte": (
                                 "Esta imagen no parece corresponder a camisa debido "
                                 "a la forma y el contexto."
@@ -825,6 +892,7 @@ class CurationPipelineTests(unittest.TestCase):
                             "descripcion": "Camisa azul.",
                             "colores": ["azul", "negro", "blanco"],
                             "estilos": ["casual", "formal", "deportivo"],
+                            "temporadas": [],
                         })
                     },
                     "finish_reason": "stop",
@@ -844,7 +912,7 @@ class CurationPipelineTests(unittest.TestCase):
             )
         self.assertTrue(result["apta"])
         self.assertEqual(result["colores"], ["azul", "blanco", "negro"])
-        self.assertEqual(result["estilos"], ["casual", "deportivo", "formal"])
+        self.assertEqual(result["estilos"], ["casual", "formal", "deportivo"])
         payload = post.call_args.kwargs["json"]
         self.assertEqual(payload["response_format"], {"type": "json_object"})
         self.assertEqual(payload["thinking"], {"type": "disabled"})
@@ -852,6 +920,71 @@ class CurationPipelineTests(unittest.TestCase):
         self.assertIn("Ejemplo de forma", payload["messages"][0]["content"][0]["text"])
         self.assertIn("máximo 12 palabras", payload["messages"][0]["content"][0]["text"])
         self.assertIn("colores (lista de máximo 3)", payload["messages"][0]["content"][0]["text"])
+
+    def test_deepseek_accepts_new_styles_and_seasons_but_rejects_unknown_colors(self):
+        response = SimpleNamespace(
+            status_code=200,
+            raise_for_status=lambda: None,
+            json=lambda: {
+                "choices": [{
+                    "message": {
+                        "content": json.dumps({
+                            "apta": True,
+                            "motivo_descarte": "",
+                            "descripcion": "Camisa azul.",
+                            "colores": ["azul"],
+                            "estilos": ["bohemio"],
+                            "temporadas": ["otoño"],
+                        })
+                    },
+                    "finish_reason": "stop",
+                }]
+            },
+        )
+        with patch.object(app.requests, "post", return_value=response):
+            result = app.annotate_image(
+                self.image_path,
+                "camisa",
+                "deepseek",
+                "test-secret",
+                "https://test.invalid/v1",
+                "deepseek-flash",
+                ["azul"],
+                ["casual"],
+                seasons=["invierno"],
+            )
+        self.assertEqual(result["estilos"], ["bohemio"])
+        self.assertEqual(result["temporadas"], ["otoño"])
+
+        invalid_color = copy.deepcopy(response)
+        invalid_color.json = lambda: {
+            "choices": [{
+                "message": {
+                    "content": json.dumps({
+                        "apta": True,
+                        "motivo_descarte": "",
+                        "descripcion": "Camisa azul.",
+                        "colores": ["cian"],
+                        "estilos": ["bohemio"],
+                        "temporadas": ["otoño"],
+                    })
+                },
+                "finish_reason": "stop",
+            }]
+        }
+        with patch.object(app.requests, "post", return_value=invalid_color):
+            with self.assertRaisesRegex(ValueError, "colores contiene valores fuera del catálogo"):
+                app.annotate_image(
+                    self.image_path,
+                    "camisa",
+                    "deepseek",
+                    "test-secret",
+                    "https://test.invalid/v1",
+                    "deepseek-flash",
+                    ["azul"],
+                    ["casual"],
+                    seasons=["invierno"],
+                )
 
     def test_deepseek_empty_json_output_is_retried_once(self):
         valid_content = json.dumps({

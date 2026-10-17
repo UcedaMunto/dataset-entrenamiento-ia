@@ -75,6 +75,7 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(data["counts_by_type"]["camisa"], 1)
         self.assertEqual(data["recent_images"][0]["proveedor"], "nim")
         self.assertEqual(data["recent_images"][0]["sugerencias_ia"]["colores"], ["azul"])
+        self.assertIn("temporada", data["properties"])
         self.assertTrue(data["providers"]["nim"])
         self.assertNotIn("do-not-return-this-secret", json.dumps(data))
 
@@ -140,7 +141,11 @@ class DashboardTests(unittest.TestCase):
     def test_prompt_and_property_updates_are_persisted(self):
         handler = object.__new__(dashboard.DashboardHandler)
         handler._save_prompt({"instructions": "Describe solo ropa visible."})
-        handler._save_properties({"color": ["azul", "rojo"], "estilo": ["casual"]})
+        handler._save_properties({
+            "color": ["azul", "rojo"],
+            "estilo": ["casual", "bohemio"],
+            "temporada": ["invierno", "otoño"],
+        })
         with sqlite3.connect(self.database) as connection:
             prompt = connection.execute(
                 "SELECT valor FROM pipeline_config WHERE clave='prompt_instructions'"
@@ -148,8 +153,16 @@ class DashboardTests(unittest.TestCase):
             colors = json.loads(connection.execute(
                 "SELECT valores_permitidos FROM catalogo_propiedad WHERE codigo='color'"
             ).fetchone()[0])
+            styles = json.loads(connection.execute(
+                "SELECT valores_permitidos FROM catalogo_propiedad WHERE codigo='estilo'"
+            ).fetchone()[0])
+            seasons = json.loads(connection.execute(
+                "SELECT valores_permitidos FROM catalogo_propiedad WHERE codigo='temporada'"
+            ).fetchone()[0])
         self.assertEqual(prompt, "Describe solo ropa visible.")
         self.assertEqual(colors, ["azul", "rojo"])
+        self.assertEqual(styles, ["casual", "bohemio"])
+        self.assertEqual(seasons, ["invierno", "otoño"])
 
     def test_credentials_are_replaced_without_readback_or_dropping_existing_keys(self):
         handler = object.__new__(dashboard.DashboardHandler)

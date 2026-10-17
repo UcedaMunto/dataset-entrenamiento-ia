@@ -31,8 +31,8 @@ NIM_TIMEOUT_RETRY_MAX_SECONDS = 120
 _nim_request_lock = threading.Lock()
 _last_nim_request_at: float | None = None
 CANCEL_REQUESTED = threading.Event()
-ANALYSIS_PROMPT_VERSION = "3"
-NIM_ANALYSIS_PROMPT_VERSION = "4"
+ANALYSIS_PROMPT_VERSION = "4"
+NIM_ANALYSIS_PROMPT_VERSION = "5"
 DEFAULT_PROMPT_INSTRUCTIONS = (
     "Determina si la imagen muestra claramente una sola prenda de la clase indicada. "
     "Si no corresponde a la clase, está corrupta, es ilegible, contiene principalmente "
@@ -675,7 +675,7 @@ def _nim_catalog_values(result: dict, field: str, catalog: list[str]) -> list[st
     return accepted
 
 
-def _dynamic_catalog_values(result: dict, field: str) -> list[str]:
+def _dynamic_catalog_values(result: dict, field: str, limit: int = 2) -> list[str]:
     values = result.get(field, [])
     if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
         raise ValueError(f"El proveedor no devolvió una lista de texto para {field}.")
@@ -689,7 +689,7 @@ def _dynamic_catalog_values(result: dict, field: str) -> list[str]:
         if folded not in seen:
             cleaned.append(normalized)
             seen.add(folded)
-    return cleaned[:2]
+    return cleaned[:limit]
 
 
 def merge_catalog_values(
@@ -728,10 +728,13 @@ def merge_catalog_values(
 def merge_annotation_catalogs(
     connection: sqlite3.Connection, annotation: dict | None
 ) -> None:
-    if not annotation or not annotation.get("apta"):
+    if not annotation:
         return
-    merge_catalog_values(connection, "estilo", annotation["estilos"])
-    merge_catalog_values(connection, "temporada", annotation["temporadas"])
+    for code, field in (("estilo", "estilos"), ("temporada", "temporadas")):
+        values = annotation.get(field, [])
+        if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
+            raise ValueError(f"Lista de sugerencias inválida para {field}.")
+        merge_catalog_values(connection, code, values)
 
 
 def annotate_nim_image(
@@ -918,6 +921,10 @@ def annotate_image(
                 if provider == "nim"
                 else reason.strip()[:500]
             ) or "La IA descartó la imagen.",
+            "estilos": _dynamic_catalog_values(
+                result, "estilos", 2 if provider == "nim" else 3
+            ),
+            "temporadas": _dynamic_catalog_values(result, "temporadas"),
         }
     description = result.get("descripcion")
     if not isinstance(description, str) or not description.strip():
@@ -929,7 +936,9 @@ def annotate_image(
         result[field] = sorted(set(values))
         if provider == "nim":
             result[field] = result[field][:2]
-    styles_found = _dynamic_catalog_values(result, "estilos")
+    styles_found = _dynamic_catalog_values(
+        result, "estilos", 2 if provider == "nim" else 3
+    )
     seasons_found = _dynamic_catalog_values(result, "temporadas")
     return {
         "apta": True,
@@ -1017,9 +1026,9 @@ def import_one(
 
     if annotation:
         attributes = {
-            "colores": annotation["colores"],
-            "estilos": annotation["estilos"],
-            "temporadas": annotation["temporadas"],
+            "colores": annotation.get("colores", []),
+            "estilos": annotation.get("estilos", []),
+            "temporadas": annotation.get("temporadas", []),
         }
         connection.execute(
             """
