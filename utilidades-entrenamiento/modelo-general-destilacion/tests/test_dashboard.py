@@ -357,6 +357,39 @@ class DashboardTests(unittest.TestCase):
         stop.assert_called_once_with("nim")
         handler._send_json.assert_called_once_with(202, {"status": "running"})
 
+    def test_clear_job_errors_keeps_non_errors_and_only_changes_selected_provider(self):
+        states = {
+            "nim": {
+                "status": "running",
+                "started_at": "2026-10-17T11:04:41+00:00",
+                "logs": ["Imágenes preparadas: 10", "Salida NIM inválida en etapa color", "Procesadas: 2"],
+            },
+            "deepseek": {"status": "completed", "logs": ["Error de proveedor"]},
+        }
+        with patch.object(dashboard, "JOB_STATES", states):
+            result = dashboard.clear_job_errors("nim")
+
+        self.assertEqual(result["cleared_errors"], 1)
+        self.assertEqual(result["logs"], ["Imágenes preparadas: 10", "Procesadas: 2"])
+        self.assertEqual(states["nim"]["status"], "running")
+        self.assertEqual(states["deepseek"]["logs"], ["Error de proveedor"])
+
+    def test_clear_job_errors_endpoint_calls_clear_for_selected_provider(self):
+        handler = object.__new__(dashboard.DashboardHandler)
+        handler.headers = Message()
+        handler.headers["Host"] = "127.0.0.1:8787"
+        handler.headers["Origin"] = "http://127.0.0.1:8787"
+        handler.headers["Content-Type"] = "application/json"
+        body = json.dumps({"provider": "nim"}).encode()
+        handler.headers["Content-Length"] = str(len(body))
+        handler.rfile = BytesIO(body)
+        handler.path = "/api/jobs/clear-errors"
+        handler._send_json = unittest.mock.Mock()
+        with patch.object(dashboard, "clear_job_errors", return_value={"logs": [], "cleared_errors": 2}) as clear:
+            dashboard.DashboardHandler.do_POST(handler)
+        clear.assert_called_once_with("nim")
+        handler._send_json.assert_called_once_with(200, {"logs": [], "cleared_errors": 2})
+
     def test_job_logs_redact_provider_keys(self):
         states = {"nim": {"logs": []}}
         with patch.object(dashboard, "JOB_STATES", states):

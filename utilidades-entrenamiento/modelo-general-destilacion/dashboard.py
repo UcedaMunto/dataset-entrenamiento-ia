@@ -103,6 +103,44 @@ def _append_job_log(provider: str, line: str, secrets: list[str]) -> None:
         state["logs"] = state["logs"][-80:]
 
 
+def _is_job_error_log(line: str) -> bool:
+    lowered = line.casefold()
+    return any(marker in lowered for marker in (
+        "error",
+        "failed",
+        "failure",
+        "exception",
+        "traceback",
+        "timeout",
+        "inválid",
+        "invalid",
+        "falló",
+        "fallo",
+        "fallida",
+        "fallidas",
+        "fallidos",
+    ))
+
+
+def clear_job_errors(provider: str) -> dict:
+    if provider not in {"nim", "deepseek", "none"}:
+        raise ValueError("Proveedor inválido para limpiar el registro.")
+    with JOB_LOCK:
+        state = JOB_STATES.get(provider)
+        if state is None:
+            state = _empty_job(provider)
+        logs = state["logs"]
+        retained = [line for line in logs if not _is_job_error_log(line)]
+        cleared_errors = len(logs) - len(retained)
+        if provider in JOB_STATES:
+            state["logs"] = retained
+        return {
+            **state,
+            "logs": list(retained),
+            "cleared_errors": cleared_errors,
+        }
+
+
 def _run_ingest(
     provider: str,
     command: list[str],
@@ -818,6 +856,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 if not isinstance(provider, str):
                     raise ValueError("Indica el proveedor que quieres detener.")
                 self._send_json(202, stop_ingest(provider))
+            elif path == "/api/jobs/clear-errors":
+                provider = payload.get("provider")
+                if not isinstance(provider, str):
+                    raise ValueError("Indica el proveedor cuyo registro quieres limpiar.")
+                self._send_json(200, clear_job_errors(provider))
             else:
                 self._send_json(404, {"error": "Ruta no encontrada."})
         except (OSError, sqlite3.Error, ValueError, KeyError) as error:

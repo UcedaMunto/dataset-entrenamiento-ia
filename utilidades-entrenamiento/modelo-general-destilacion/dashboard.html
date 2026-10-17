@@ -43,6 +43,8 @@
     .provider-jobs { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:12px; margin-top:16px }
     .provider-job { min-width:0; border:1px solid var(--line); border-radius:9px; padding:14px; background:#151d27 }
     .provider-job h3 { margin:0 } .provider-job pre { min-height:50px; max-height:170px; margin:10px 0 0 }
+    .job-log-controls { margin-top:10px }
+    .job-log-notice { min-height:1.5em; margin:6px 0 0 }
     dialog { width:min(720px,calc(100vw - 28px)); border:1px solid #405064; border-radius:12px; background:var(--panel); color:var(--text); padding:0; box-shadow:0 18px 60px #0009 }
     dialog::backdrop { background:#05080dcc }
     .modal-head,.modal-body,.modal-foot { padding:16px 20px } .modal-head,.modal-foot { border-bottom:1px solid var(--line) } .modal-foot { border:0; border-top:1px solid var(--line); justify-content:flex-end }
@@ -307,7 +309,14 @@
     }
     async function refresh() { try { render(await request("/api/overview")); setStatus("status",`Actualizado ${new Date().toLocaleTimeString("es-MX")}`); } catch(error) { setStatus("status",error.message,"error"); } }
     const providerCheckboxes = {nim:"providerNim",deepseek:"providerDeepseek",none:"providerNone"};
+    const frozenJobLogs = new Map();
+    const jobLogNotices = new Map();
+    let latestJobs=[];
+    function isJobErrorLog(line) {
+      return /(error|failed|failure|exception|traceback|timeout|inválid|invalid|falló|fallo|fallida|fallidas|fallidos)/i.test(line);
+    }
     function renderJobs(jobs) {
+      latestJobs=jobs;
       const states=Object.fromEntries(jobs.map(job=>[job.provider,job]));
       const running=jobs.filter(job=>job.status==="running");
       $("jobState").textContent=running.length?`${running.length} ejecución${running.length===1?"":"es"} activa${running.length===1?"":"s"}`:"Sin ejecuciones activas";
@@ -315,6 +324,10 @@
       const root=$("providerJobs"); root.replaceChildren();
       for(const provider of ["nim","deepseek","none"]) {
         const job=states[provider] || {provider,status:"idle",message:"Todavía no se ha iniciado un procesamiento.",logs:[]};
+        let frozen=frozenJobLogs.get(provider);
+        if(frozen&&frozen.startedAt!==job.started_at) {
+          frozenJobLogs.delete(provider); jobLogNotices.delete(provider); frozen=null;
+        }
         const card=document.createElement("article"); card.className="provider-job";
         const heading=document.createElement("div"); heading.className="section-head";
         const title=document.createElement("h3"); title.textContent=providerNames[provider];
@@ -328,7 +341,26 @@
         const stop=document.createElement("button"); stop.type="button"; stop.className="danger"; stop.dataset.provider=provider;
         stop.textContent=job.cancellation_requested?"Detención solicitada…":"■ Detener envío";
         stop.disabled=job.status!=="running"||job.cancellation_requested; stop.addEventListener("click",()=>stopJob(provider)); card.append(stop);
-        const logs=document.createElement("pre"); logs.textContent=(job.logs||[]).join("\n")||(job.status==="running"?"Esperando salida del proceso…":"El registro del proceso aparecerá aquí.");
+        const logControls=document.createElement("div"); logControls.className="row job-log-controls";
+        const freezeButton=document.createElement("button"); freezeButton.type="button"; freezeButton.className="subtle";
+        freezeButton.textContent=frozen?"▶ Reanudar lista":"❄ Congelar lista";
+        freezeButton.setAttribute("aria-pressed",String(Boolean(frozen)));
+        freezeButton.addEventListener("click",()=>{
+          if(frozenJobLogs.has(provider)) frozenJobLogs.delete(provider);
+          else frozenJobLogs.set(provider,{startedAt:job.started_at,logs:[...(job.logs||[])]});
+          renderJobs(latestJobs);
+        });
+        const clearButton=document.createElement("button"); clearButton.type="button"; clearButton.className="subtle";
+        clearButton.textContent="Borrar errores";
+        clearButton.disabled=!(job.logs||[]).some(isJobErrorLog);
+        clearButton.addEventListener("click",()=>clearJobErrors(provider));
+        logControls.append(freezeButton,clearButton); card.append(logControls);
+        const notice=jobLogNotices.get(provider);
+        if(notice&&notice.startedAt===job.started_at) {
+          const message=document.createElement("p"); message.className="muted job-log-notice"; message.textContent=notice.message; card.append(message);
+        }
+        const visibleLogs=frozen?frozen.logs:(job.logs||[]);
+        const logs=document.createElement("pre"); logs.textContent=visibleLogs.join("\n")||(job.status==="running"?"Esperando salida del proceso…":"El registro del proceso aparecerá aquí.");
         card.append(logs); root.append(card);
         if(providerCheckboxes[provider]) $(providerCheckboxes[provider]).disabled=job.status==="running"||(provider!=="none"&&latestData&&!latestData.providers[provider]);
       }
@@ -386,6 +418,18 @@
       } catch(error) {
         setStatus("jobMessage",error.message,"error");
         await refreshJobs();
+      }
+    }
+    async function clearJobErrors(provider) {
+      try {
+        const result=await request("/api/jobs/clear-errors",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({provider})});
+        const frozen=frozenJobLogs.get(provider);
+        if(frozen&&frozen.startedAt===result.started_at) frozen.logs=frozen.logs.filter(line=>!isJobErrorLog(line));
+        jobLogNotices.set(provider,{startedAt:result.started_at,message:`Se borraron ${result.cleared_errors} línea${result.cleared_errors===1?"":"s"} de error. El procesamiento continúa.`});
+        latestJobs=latestJobs.map(job=>job.provider===provider?{...job,logs:result.logs}:job);
+        renderJobs(latestJobs);
+      } catch(error) {
+        setStatus("jobMessage",error.message,"error");
       }
     }
     $("promptButton").addEventListener("click",async()=>{ try { latestData=await request("/api/overview"); $("promptText").value=latestData.prompt_instructions; $("promptPreview").textContent=latestData.prompt_preview; setStatus("promptStatus",""); openDialog("promptModal"); } catch(e) { setStatus("status",e.message,"error"); } });
