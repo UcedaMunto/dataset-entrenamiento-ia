@@ -80,6 +80,8 @@ Abre `http://127.0.0.1:8787`. El servicio usa la red del host porque el reenvío
 
 Las claves se capturan como campos tipo password, nunca se devuelven al navegador y se escriben en `.env` con permisos privados. El prompt y las listas de color/estilo/temporada se guardan en SQLite. Cambiar prompt, modelo, categoría o vocabulario produce una huella de análisis distinta para que el cache no reutilice un resultado obsoleto. El estimado a 5.000 requiere historial suficiente; antes el panel lo indica sin inventar un tiempo.
 
+Si un lote termina con `El destino ya existe y no está registrado`, el importador ahora compara el SHA-256 del archivo existente con el original. Si coinciden, reutiliza el archivo y completa su registro en SQLite sin volver a copiarlo; si difieren, se detiene y conserva ambos contenidos. Reintenta desde el dashboard: cuando el análisis aceptado sigue en cache para el mismo proveedor, modelo y prompt, se importa sin otra llamada remota. No se relanza un lote automáticamente tras un error.
+
 1. Descarga manualmente los datasets autorizados en los directorios de la tabla.
 2. Audita sin escribir ni contactar proveedores:
 

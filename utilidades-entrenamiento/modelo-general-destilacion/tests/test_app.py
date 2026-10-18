@@ -628,6 +628,61 @@ class CurationPipelineTests(unittest.TestCase):
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM analisis_imagen").fetchone()[0], 1)
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM prenda_imagen").fetchone()[0], 1)
 
+    def test_existing_orphan_with_matching_digest_is_registered_without_copy(self):
+        code = f"fixture-{self.digest[:16]}"
+        folder = self.dataset_root / app.CATEGORY_PATHS["camisa"] / code
+        folder.mkdir(parents=True)
+        image_path = folder / "imagen.png"
+        image_path.write_bytes(self.image_path.read_bytes())
+        created_files = []
+
+        with sqlite3.connect(self.database, timeout=10) as connection:
+            connection.execute("PRAGMA foreign_keys = ON")
+            imported = app.import_one(
+                connection,
+                self.item,
+                "fixture",
+                self.source,
+                self.dataset_root,
+                None,
+                "none",
+                "none",
+                created_files,
+            )
+            connection.commit()
+
+        self.assertTrue(imported)
+        self.assertEqual(created_files, [])
+        self.assertEqual(hashlib.sha256(image_path.read_bytes()).hexdigest(), self.digest)
+        with sqlite3.connect(self.database) as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM prenda_imagen").fetchone()[0], 1)
+
+    def test_existing_orphan_with_different_digest_is_not_overwritten(self):
+        code = f"fixture-{self.digest[:16]}"
+        folder = self.dataset_root / app.CATEGORY_PATHS["camisa"] / code
+        folder.mkdir(parents=True)
+        image_path = folder / "imagen.png"
+        image_path.write_bytes(b"unrelated existing content")
+
+        with sqlite3.connect(self.database, timeout=10) as connection:
+            connection.execute("PRAGMA foreign_keys = ON")
+            with self.assertRaisesRegex(FileExistsError, "contenido distinto"):
+                app.import_one(
+                    connection,
+                    self.item,
+                    "fixture",
+                    self.source,
+                    self.dataset_root,
+                    None,
+                    "none",
+                    "none",
+                    [],
+                )
+
+        self.assertEqual(image_path.read_bytes(), b"unrelated existing content")
+        with sqlite3.connect(self.database) as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM prenda_imagen").fetchone()[0], 0)
+
     def test_parallel_imports_of_same_hash_create_only_one_dataset_item(self):
         barrier = threading.Barrier(2)
 

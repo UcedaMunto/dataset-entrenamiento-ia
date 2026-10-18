@@ -1212,9 +1212,13 @@ def import_one(
     folder.mkdir(parents=True, exist_ok=True)
     image_path = folder / f"imagen{safe_extension(item['path'])}"
     if image_path.exists():
-        raise FileExistsError(f"El destino ya existe y no está registrado: {image_path}")
-    shutil.copy2(item["path"], image_path)
-    created_files.append(image_path)
+        if file_digest(image_path) != item["digest"]:
+            raise FileExistsError(
+                f"El destino ya existe con contenido distinto y no está registrado: {image_path}"
+            )
+    else:
+        shutil.copy2(item["path"], image_path)
+        created_files.append(image_path)
     relative_path = image_path.relative_to(dataset_root).as_posix()
 
     connection.execute(

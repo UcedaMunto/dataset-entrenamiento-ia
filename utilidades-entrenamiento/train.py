@@ -3,6 +3,7 @@ import argparse
 import hashlib
 import json
 import random
+import re
 import sqlite3
 import sys
 from collections import defaultdict
@@ -18,6 +19,42 @@ from torchvision import models, transforms
 
 
 PROPERTY_CODES = ("tipo_prenda", "color", "estilo")
+CONTINUATION_STRATEGIES = {
+    "fine_tune": {
+        "epochs": 10,
+        "learning_rate": 0.0001,
+        "finetune_lr": 0.00001,
+        "finetune": True,
+        "warmup_epochs": 0,
+    },
+    "heads_only": {
+        "epochs": 10,
+        "learning_rate": 0.0001,
+        "finetune_lr": 0.00001,
+        "finetune": False,
+        "warmup_epochs": 0,
+    },
+}
+
+
+def apply_continuation_strategy(config: dict, strategy: str) -> dict:
+    if strategy not in CONTINUATION_STRATEGIES:
+        raise ValueError(f"Estrategia de continuación no válida: {strategy}")
+    updated = dict(config)
+    updated.update(CONTINUATION_STRATEGIES[strategy])
+    updated["pretrained"] = False
+    return updated
+
+
+def validate_initial_checkpoint(checkpoint: dict, classes: dict, image_size: int) -> None:
+    if checkpoint.get("architecture") != "mobilenet_v3_small":
+        raise ValueError("La arquitectura del checkpoint no es compatible con MobileNetV3-Small.")
+    if checkpoint.get("classes") != classes:
+        raise ValueError("El catálogo de clases cambió; no se puede continuar desde este checkpoint.")
+    if checkpoint.get("image_size") != image_size:
+        raise ValueError("La resolución de imagen debe coincidir con la del checkpoint.")
+    if not isinstance(checkpoint.get("state_dict"), dict):
+        raise ValueError("El checkpoint no contiene los pesos del modelo.")
 
 
 class MultiTaskMobileNet(nn.Module):
@@ -77,6 +114,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", default="/app/configs/default.yaml")
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), help="Sobrescribe el dispositivo.")
     parser.add_argument("--epochs", type=int, help="Sobrescribe la cantidad de épocas.")
+    parser.add_argument("--continue-from", help="ID de ejecución cuyo mejor checkpoint se usará como inicio.")
+    parser.add_argument("--strategy", choices=tuple(CONTINUATION_STRATEGIES), help="Estrategia de continuación.")
     return parser.parse_args()
 
 
@@ -479,6 +518,18 @@ def main() -> int:
     args = parse_args()
     config_path = Path(args.config)
     config = load_config(config_path)
+    source_run = args.continue_from
+    source_checkpoint = None
+    if source_run:
+        if not re.fullmatch(r"\d{8}-\d{6}", source_run):
+            raise ValueError("El ID de ejecución de origen no es válido.")
+        source_checkpoint_path = Path(config["model_dir"]) / source_run / "best.pt"
+        if not source_checkpoint_path.is_file():
+            raise FileNotFoundError(f"No existe el mejor checkpoint de {source_run}.")
+        source_checkpoint = torch.load(source_checkpoint_path, map_location="cpu", weights_only=True)
+        config = apply_continuation_strategy(config, args.strategy or "fine_tune")
+    elif args.strategy:
+        raise ValueError("--strategy requiere --continue-from.")
     if args.epochs is not None:
         if args.epochs < 1:
             raise ValueError("--epochs debe ser positivo.")
@@ -499,6 +550,14 @@ def main() -> int:
     dataset_root = Path(config["dataset_root"])
     database = Path(config["database"])
     samples_by_split, classes = load_samples(database, dataset_root)
+    if source_checkpoint is not None:
+        validate_initial_checkpoint(source_checkpoint, classes, config["image_size"])
+        config["continuation"] = {
+            "source_run": source_run,
+            "source_epoch": source_checkpoint["epoch"],
+            "strategy": args.strategy or "fine_tune",
+            "optimizer_state_restored": False,
+        }
     use_cuda = device.type == "cuda"
     eval_transform = build_transform(config["image_size"])
     train_transform = build_transform(config["image_size"], config.get("augment", True))
@@ -532,8 +591,10 @@ def main() -> int:
         type_count=len(classes["tipo_prenda"]),
         color_count=len(classes["color"]),
         style_count=len(classes["estilo"]),
-        pretrained=config["pretrained"],
+        pretrained=config["pretrained"] if source_checkpoint is None else False,
     )
+    if source_checkpoint is not None:
+        model.load_state_dict(source_checkpoint["state_dict"])
     model.to(device)
 
     # Fase 1: solo cabezas; fase 2: ajuste fino de toda la base con lr menor.
@@ -566,6 +627,13 @@ def main() -> int:
     patience = int(config.get("early_stopping_patience", 5))
     ledger_path = Path(config.get("ledger", "/app/modelo-ia/registro_entrenamiento.sqlite"))
     register_run(ledger_path, run_id, config, samples_by_split, database)
+    if source_checkpoint is not None:
+        print(
+            f"Continuación desde {source_run}, mejor checkpoint de época "
+            f"{source_checkpoint['epoch']}, estrategia={config['continuation']['strategy']}; "
+            "optimizador y scheduler nuevos.",
+            flush=True,
+        )
     print(
         f"Dispositivo: {device}; imágenes train={len(samples_by_split['train'])}, "
         f"val={len(samples_by_split['val'])}, test={len(samples_by_split['test'])}; "

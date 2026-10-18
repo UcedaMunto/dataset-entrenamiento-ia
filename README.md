@@ -2,6 +2,15 @@
 
 > **Versión vigente:** 2. La versión anterior se conserva como respaldo descartado en [`README-v1.md`](./README-v1.md).
 
+## ¿Dónde se ve la interfaz?
+
+Hay dos paneles web, para tareas distintas:
+
+- **Entrenamiento e inferencia:** el monitor abre en `http://127.0.0.1:8090`; **Probar modelo en CPU** ejecuta inferencia de un checkpoint existente. Para servir inferencia desde una VM con CPU, hay una API separada en el puerto local `8081` que recibe foto de prenda y foto de persona usándola, y devuelve predicciones por foto más una descripción combinada. El servicio no monta el dataset ni inicia entrenamiento. Sigue los comandos y límites de despliegue en [`utilidades-entrenamiento/README.md`](./utilidades-entrenamiento/README.md#api-de-inferencia-en-una-vm-con-cpu). El servicio `train` por sí solo no publica un puerto ni tiene interfaz.
+- **Curación de datos:** desde `utilidades-entrenamiento/modelo-general-destilacion/`, ejecuta `docker compose up -d dashboard` y abre `http://127.0.0.1:8787`. Este panel gestiona importación y anotación de imágenes; no es el monitor de entrenamiento. Consulta su [guía](./utilidades-entrenamiento/modelo-general-destilacion/README.md).
+
+Las direcciones `127.0.0.1` funcionan en la máquina donde corre Docker. Si Docker corre en un servidor remoto, crea un túnel SSH (por ejemplo, `ssh -L 8090:127.0.0.1:8090 usuario@servidor`) y luego abre `http://127.0.0.1:8090` en tu computadora.
+
 Módulo pequeño de visión por computadora para complementar el proyecto de OpenStack y Kubernetes. El objetivo es entrenar un modelo que, a partir de **una o varias fotos de la misma prenda**, devuelva:
 
 - Tipo: camisa, pantalón, vestido, falda, etc.

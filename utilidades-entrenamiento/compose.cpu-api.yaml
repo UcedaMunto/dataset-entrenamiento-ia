@@ -1,0 +1,19 @@
+services:
+  inference-api:
+    image: modelo-reconocimiento-inferencia:cpu
+    build:
+      context: .
+      dockerfile: Dockerfile
+    init: true
+    user: "${TRAINING_UID:-1000}:${TRAINING_GID:-1000}"
+    shm_size: 1g
+    entrypoint: ["python", "/app/inference_api.py"]
+    environment:
+      MODEL_CHECKPOINT: /models/best.pt
+      API_CPU_THREADS: "${API_CPU_THREADS:-4}"
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - "${MODEL_CHECKPOINT:-/tmp/model-checkpoint-not-configured.pt}:/models/best.pt:ro"
+    ports:
+      - "127.0.0.1:8081:8080"
+    restart: unless-stopped

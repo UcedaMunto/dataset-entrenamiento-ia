@@ -2,6 +2,25 @@
 
 Este directorio contiene el entorno Docker Compose y los scripts para el MVP MobileNetV3-Small. El dataset y sus tablas SQLite permanecen en `../dataset/`; los checkpoints y la caché de pesos preentrenados se escriben en `modelo-ia/`. Los repositorios auxiliares descargados, si fueran necesarios, se pueden colocar en `repositorios/`; no se versionan automáticamente.
 
+## Interfaz de entrenamiento
+
+El servicio `train` entrena en segundo plano y no publica puertos; por eso no aparece una URL en `docker ps`. Para abrir el panel de seguimiento, ejecuta desde este directorio:
+
+```bash
+docker compose build
+docker compose --profile monitor up -d monitor
+```
+
+Abre `http://127.0.0.1:8090`. El panel permite iniciar o detener el entrenamiento, revisar progreso/métricas y probar los modelos guardados. Para detener el panel: `docker compose --profile monitor down`. Si Docker corre en otra máquina, usa un túnel SSH para el puerto 8090; el panel se enlaza solo a localhost.
+
+El dashboard de curación de datos es independiente y se sirve en `http://127.0.0.1:8787`; sus instrucciones están en [`modelo-general-destilacion/README.md`](./modelo-general-destilacion/README.md).
+
+### Prueba CPU de un modelo ya entrenado
+
+En el monitor pulsa **Probar modelo en CPU**, selecciona una ejecución con `best.pt` y carga una imagen. La interfaz muestra la predicción y latencias de carga del checkpoint, preparación de imagen, inferencia y petición total. El cargador ubica el modelo en CPU y la inferencia no actualiza ni guarda pesos. Esta es una prueba funcional/latencia de **inferencia del modelo ya entrenado**; no inicia entrenamiento ni mide cuánto tardaría una época.
+
+En el servidor revisado hay 12 CPU lógicas y 15 GiB de RAM; el dataset tenía 12.379 imágenes train, 1.511 val y 1.529 test. Una inferencia CPU exitosa permite evaluar el uso del modelo sin GPU en ese host, pero no basta para afirmar que entrenar sobre todo ese dataset en CPU sea práctico. Para eso se necesitaría un benchmark de entrenamiento separado y autorizado, que no forma parte de esta prueba.
+
 ## Requisitos
 
 - Docker Engine y Docker Compose v2.
@@ -43,7 +62,17 @@ Sobrescribir opciones sin editar la configuración:
 docker compose run --rm train train --epochs 1 --device cpu
 ```
 
-Los hiperparámetros predeterminados están en [`configs/default.yaml`](./configs/default.yaml). Se empieza con el extractor congelado, 160 × 160 píxeles y batch 2. Los pesos preentrenados se guardan bajo `modelo-ia/cache/`; cada ejecución crea un directorio nuevo en `modelo-ia/runs/` con `best.pt`, `config.json` y `metrics.json`.
+Los hiperparámetros predeterminados están en [`configs/default.yaml`](./configs/default.yaml): MobileNetV3-Small a 224 × 224, batch 64, hasta 30 épocas, calentamiento inicial de cabezas y ajuste fino, con parada temprana. Los pesos preentrenados se guardan bajo `modelo-ia/cache/`; cada ejecución crea un directorio nuevo en `modelo-ia/runs/` con `best.pt`, `config.json` y `metrics.json`.
+
+## Estrategia recomendada para continuar
+
+En el historial actual, la ejecución que registró 20 épocas guardó su mejor checkpoint en la época 15 (pérdida de validación 0,513). La ejecución posterior quedó en 7 épocas y su mejor pérdida registrada es 0,577. Por eso la recomendación es seleccionar la ejecución de 20 épocas y continuar desde su `best.pt` (época 15), no desde la ejecución parcial ni desde su última época. Esta comparación solo es válida si ambas ejecuciones usaron el mismo split de validación; verifica los artefactos y el registro de imágenes si el dataset cambió.
+
+En el monitor, selecciona la ejecución en **Ejecución**, elige **Ajuste fino completo (recomendado)** y pulsa **Continuar desde mejor checkpoint**. Esta estrategia inicia una nueva fase de hasta 10 épocas: conserva los pesos del checkpoint, ajusta toda la red, usa tasa de aprendizaje `0.0001` para las cabezas y `0.00001` para MobileNet, y mantiene la parada temprana con paciencia 5. La ejecución nueva guarda su origen y estrategia en `config.json`; valida su checkpoint con el conjunto de validación. El conjunto `test` no se usa para escoger el checkpoint y debe reservarse para la evaluación final.
+
+**Solo entrenar las cabezas** es la alternativa conservadora si el ajuste fino completo hace que la pérdida de validación empeore o el dataset sea muy pequeño: mantiene congelada la base MobileNet y adapta las salidas de tipo, color y estilo. Se puede detener la fase desde el monitor si la validación se deteriora; cada época y checkpoint quedan en una ejecución separada.
+
+Continuar es un *warm start*, no una reanudación exacta: cada fase nueva usa optimizador, scheduler y contador de épocas nuevos porque los checkpoints actuales no guardan esos estados. La interfaz usa el mejor checkpoint de la ejecución seleccionada y solo lo acepta si coinciden arquitectura, catálogo de clases y resolución. Si cambia el catálogo, corrige/configura la compatibilidad antes de continuar; no fuerces el `state_dict`.
 
 La pérdida de colores y estilos solo se calcula para prendas que tengan esas anotaciones; una etiqueta ausente en SQLite se trata como no anotada, no como negativa. Las métricas de tipo se calculan sobre imágenes de validación; precision/recall/F1 multi-etiqueta se calculan sobre los ejemplos con anotaciones correspondientes. Revisar especialmente el tamaño del dataset y las métricas antes de usar el checkpoint.
 
@@ -59,6 +88,71 @@ docker compose run --rm train predict \
 ```
 
 El umbral por defecto proviene del checkpoint; se puede ajustar con `--threshold 0.5`.
+
+## API de inferencia en una VM con CPU
+
+`inference_api.py` es un servicio independiente del monitor y del curador. Sirve **solo inferencia** de un `best.pt` existente: obliga a usar CPU, carga un único checkpoint de solo lectura al iniciar y no monta `dataset/`, SQLite de entrenamiento ni cachés. No requiere GPU, NVIDIA Container Toolkit ni conexión a proveedores de anotación. El contenedor parte de la imagen PyTorch actual, que puede incluir bibliotecas CUDA, pero no reserva ni usa GPU.
+
+### Requisitos y selección del modelo
+
+- VM Linux con Docker Engine y Docker Compose v2.
+- Un checkpoint `best.pt` compatible con `MobileNetV3-Small` y las clases guardadas en él. Para el historial descrito en esta guía, el checkpoint recomendado es `modelo-ia/runs/20261018-020637/best.pt`, cuyo mejor estado fue la época 15.
+- Memoria y CPU suficientes para mantener el proceso y ejecutar inferencias. En el host de desarrollo medimos 12 CPU lógicas y 15 GiB RAM; esto no es un mínimo universal ni mide tiempo de entrenamiento.
+
+Desde `utilidades-entrenamiento/`, selecciona un checkpoint que exista en esa VM y levanta la API:
+
+```bash
+export MODEL_CHECKPOINT="$PWD/modelo-ia/runs/20261018-020637/best.pt"
+export API_CPU_THREADS=4
+docker compose -f compose.cpu-api.yaml up -d --build
+```
+
+`MODEL_CHECKPOINT` debe ser una ruta absoluta al archivo del host; Compose lo monta como `/models/best.pt` de solo lectura. La única carpeta de datos que recibe el contenedor es el checkpoint. `API_CPU_THREADS` limita los hilos de PyTorch (predeterminado: 4). No inicies esta API con el Compose de entrenamiento ni con el dashboard de curación: tiene su propio archivo y servicio.
+
+Comprobación de salud:
+
+```bash
+curl http://127.0.0.1:8081/health
+```
+
+Respuesta esperada: `{"status":"ok","device":"cpu"}`. La especificación interactiva OpenAPI está en `http://127.0.0.1:8081/docs`.
+
+### Contrato de dos imágenes
+
+`POST /v1/predict` recibe `multipart/form-data` con exactamente estos dos campos de archivo requeridos:
+
+- `garment_image`: foto de la prenda aislada o de producto.
+- `person_image`: foto de una persona usando esa misma prenda.
+
+Admite JPEG, PNG y WebP; cada archivo puede pesar hasta 10 MiB y tener como máximo 25 megapíxeles. Ejemplo desde el host:
+
+```bash
+curl --fail-with-body -X POST http://127.0.0.1:8081/v1/predict \
+  -F 'garment_image=@/ruta/a/prenda.jpg' \
+  -F 'person_image=@/ruta/a/persona-con-prenda.jpg'
+```
+
+La respuesta incluye `descripcion_mas_probable`, probabilidades combinadas, predicciones separadas bajo `predicciones_por_imagen.prenda` y `.persona`, el método de combinación y latencias. Para tipo se promedian las distribuciones softmax de ambas imágenes; para color y estilo se promedian las probabilidades sigmoid. Color/estilo devuelven los cinco candidatos principales y marcan `supera_umbral` usando el umbral almacenado en el checkpoint.
+
+La descripción es una plantilla construida con las clases del modelo (tipo, colores y estilos); **no** la redacta un modelo de lenguaje ni incluye atributos abiertos como material, estampado o ajuste. La API tampoco verifica que ambas fotos muestren la misma prenda. El modelo fue entrenado para clasificar fotos de prendas y la imagen de una persona puede pertenecer a otro dominio visual; por eso se devuelven las dos predicciones individuales para detectar desacuerdos en lugar de ocultarlos en el promedio.
+
+### Red y seguridad
+
+El servicio se publica solo en `127.0.0.1:8081` del host y no tiene autenticación. Para acceder desde una computadora remota, crea un túnel SSH:
+
+```bash
+ssh -L 8081:127.0.0.1:8081 usuario@servidor
+```
+
+Luego usa `http://127.0.0.1:8081` en esa computadora. No publiques el puerto directamente en Internet; para acceso compartido, colócalo detrás de un proxy con TLS, autenticación y límites de solicitudes.
+
+Detener el servicio:
+
+```bash
+docker compose -f compose.cpu-api.yaml down
+```
+
+Para cambiar checkpoint, detén el servicio, actualiza `MODEL_CHECKPOINT` y vuelve a levantarlo. La prueba CPU de entrenamiento no forma parte de esta API; inferencia rápida no demuestra que entrenar todo el dataset en CPU sea viable.
 
 ## Layout
 

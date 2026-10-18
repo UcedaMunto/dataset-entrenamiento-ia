@@ -22,6 +22,8 @@ docker compose --profile monitor up -d monitor
 
 Abrir http://127.0.0.1:8090 (progreso, pérdida por época, métricas e imágenes registradas).
 
+Para continuar desde un checkpoint, selecciona la ejecución y estrategia en el panel. Se recomienda **Ajuste fino completo** desde el mejor checkpoint según validación; crea una fase nueva de hasta 10 épocas y reinicia optimizador/scheduler. Consulta la [estrategia y sus consideraciones](./README.md#estrategia-recomendada-para-continuar).
+
 ## Resultados
 
 - Pesos: `modelo-ia/runs/<fecha-hora>/best.pt`; métricas en `metrics.json` y `test_metrics.json`.

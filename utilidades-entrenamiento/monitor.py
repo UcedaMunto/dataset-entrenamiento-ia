@@ -8,6 +8,7 @@ import sys
 import io
 import random
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -43,10 +44,16 @@ table,div[style]{break-inside:avoid}@page{margin:12mm}}
 .bar span{position:absolute;left:6px;top:0;font-size:.85rem}
 </style></head><body>
 <h1>Entrenamiento de prendas</h1>
-<div class="card"><button id="start">Iniciar entrenamiento</button>
+<div class="card"><button id="start">Nuevo entrenamiento</button>
+<button id="continue">Continuar desde mejor checkpoint</button>
+<label>Estrategia <select id="strategy">
+<option value="fine_tune">Ajuste fino completo (recomendado)</option>
+<option value="heads_only">Solo entrenar las cabezas</option>
+</select></label>
+<p class="muted">Continuar crea una nueva ejecución desde el mejor checkpoint de la ejecución seleccionada. Se reinician optimizador y scheduler; no es una reanudación exacta.</p>
 <button id="stop" disabled>Detener</button> <span id="tstate" class="muted"></span>
 <pre id="log" class="muted" style="max-height:10rem;overflow:auto;margin:.5rem 0 0"></pre></div>
-<div class="card"><button id="try">Probar modelo</button>
+<div class="card"><button id="try">Probar modelo en CPU</button>
 <button id="eval">Evaluar precisión por propiedad</button></div>
 <dialog id="edlg" style="width:min(940px,96vw)"><h3>Precisión por propiedad</h3>
 <p class="noprint"><label>Modelo: <select id="erun"></select></label>
@@ -54,7 +61,7 @@ table,div[style]{break-inside:avoid}@page{margin:12mm}}
 <option value="val">val</option><option value="train">train (muestra de 2000)</option></select></label>
 <span class="noprint"><button id="ego">Evaluar</button> <button id="epdf" disabled>Exportar PDF</button> <button id="eclose">Cerrar</button></span></p>
 <div id="estate" class="muted"></div><div id="eout"></div></dialog>
-<dialog id="dlg"><h3>Probar pesos entrenados</h3>
+<dialog id="dlg"><h3>Probar pesos entrenados en CPU</h3>
 <p><label>Modelo: <select id="mrun"></select></label></p>
 <p><input type="file" id="mfile" accept="image/jpeg,image/png,image/webp"></p>
 <img id="mprev" alt="" style="max-width:100%;max-height:240px;display:none">
@@ -68,12 +75,13 @@ table,div[style]{break-inside:avoid}@page{margin:12mm}}
 <div class="card"><h3>Métricas de validación</h3><table id="tbl"></table></div>
 <div class="card"><h3>Imágenes registradas</h3><div id="imgs" class="muted"></div></div>
 <script>
-const $=id=>document.getElementById(id);let pick=false;
+const $=id=>document.getElementById(id);let pick=false,trainingRunning=false;
 async function j(u){const r=await fetch(u);return r.json()}
 async function runs(){const l=await j('/api/runs');const s=$('run'),cur=s.value;
  s.replaceChildren(...l.map(r=>{const o=document.createElement('option');o.value=o.textContent=r;return o}));
  if(!l.length){const o=document.createElement('option');o.textContent='Sin ejecuciones todavía (inicia un entrenamiento)';o.value='';s.replaceChildren(o);return}
- if(pick){s.value=l[0];pick=false}else if(cur&&l.includes(cur))s.value=cur;}
+ if(pick){s.value=l[0];pick=false}else if(cur&&l.includes(cur))s.value=cur;
+ $('continue').disabled=trainingRunning||!s.value;}
 function draw(h){const c=$('chart'),x=c.getContext('2d');x.clearRect(0,0,c.width,c.height);if(!h.length)return;
  const ser=[['train_loss',h.map(e=>e.train_loss),'#2563eb'],['val_loss',h.map(e=>e.validation.loss),'#dc2626']];
  const all=ser.flatMap(s=>s[1]),mx=Math.max(...all),mn=Math.min(...all),W=c.width-40,H=c.height-30;
@@ -93,7 +101,8 @@ async function refresh(){const id=$('run').value;if(!id)return;
  $('state').textContent=d.test?' | test: acc tipo '+(d.test.type_accuracy*100).toFixed(1)+'%':'';
  $('imgs').textContent=d.images?Object.entries(d.images).map(([k,v])=>k+': '+v).join(' | ')+` | nuevas vs. previas: ${d.new_images}`:'Sin registro.'}
 async function status(){const t=await j('/api/status');
- $('start').disabled=t.running;$('stop').disabled=!t.running;
+ trainingRunning=t.running;$('start').disabled=t.running;$('continue').disabled=t.running||!$('run').value;
+ $('stop').disabled=!t.running;
  $('tstate').textContent=t.running?'Entrenando (pid '+t.pid+')':(t.returncode===null?'Detenido':'Terminó con código '+t.returncode);
  $('log').textContent=t.log}
 async function post(u){const r=await fetch(u,{method:'POST',headers:{'X-Requested-With':'monitor'}});
@@ -115,7 +124,9 @@ $('mgo').onclick=async()=>{const f=$('mfile').files[0],out=$('mres');
  const r=await fetch('/api/predict?run='+encodeURIComponent($('mrun').value),{method:'POST',
   headers:{'X-Requested-With':'monitor','Content-Type':'application/octet-stream'},body:f});
  const d=await r.json();if(!r.ok){out.textContent=d.error||'Error';return}
- out.replaceChildren(bars('Tipo',d.tipo),bars('Colores (top 5)',d.colores),bars('Estilos (top 5)',d.estilos))};
+ const timing=document.createElement('p');timing.className='muted';
+ timing.textContent=`CPU: carga ${d.timing_ms.model_load} ms; preparación ${d.timing_ms.preprocess} ms; inferencia ${d.timing_ms.inference} ms; total ${d.timing_ms.total} ms`;
+ out.replaceChildren(timing,bars('Tipo',d.tipo),bars('Colores (top 5)',d.colores),bars('Estilos (top 5)',d.estilos))};
 function pct(v){return (v*100).toFixed(1)+'%'}
 function bars2(title,labels,series){const w=document.createElement('div');const h=document.createElement('b');h.textContent=title;w.append(h);
  const c=document.createElement('canvas');c.width=880;c.height=260;c.style.height='260px';w.append(c);
@@ -200,6 +211,7 @@ $('ego').onclick=async()=>{const q='run='+encodeURIComponent($('erun').value)+'&
  if(!r.ok){alert((await r.json()).error||'Error');return}
  $('estate').textContent='Iniciando…';epoll=setInterval(eload,2000)};
 $('start').onclick=async()=>{pick=true;await post('/api/start')};
+$('continue').onclick=()=>post('/api/continue?run='+encodeURIComponent($('run').value)+'&strategy='+encodeURIComponent($('strategy').value));
 $('stop').onclick=()=>post('/api/stop');
 (async()=>{await status();await runs();await refresh();$('run').onchange=refresh;setInterval(async()=>{await status();await runs();refresh()},3000)})();
 </script></body></html>"""
@@ -267,7 +279,10 @@ def predict_image(run_id: str, data: bytes) -> dict:
     from PIL import Image
     from torchvision import transforms
 
+    request_started = time.perf_counter()
+    model_load_started = time.perf_counter()
     model, checkpoint = load_model(run_id)
+    model_load_ms = (time.perf_counter() - model_load_started) * 1000
     classes, size = checkpoint["classes"], checkpoint["image_size"]
     threshold = checkpoint["multilabel_threshold"]
     transform = transforms.Compose([
@@ -275,16 +290,27 @@ def predict_image(run_id: str, data: bytes) -> dict:
         transforms.ToTensor(),
         transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
     ])
+    preprocess_started = time.perf_counter()
     with Image.open(io.BytesIO(data)) as image:
         tensor = transform(image.convert("RGB")).unsqueeze(0)
-    with torch.no_grad():
+    preprocess_ms = (time.perf_counter() - preprocess_started) * 1000
+    inference_started = time.perf_counter()
+    with torch.inference_mode():
         outputs = model(tensor)
+    inference_ms = (time.perf_counter() - inference_started) * 1000
     def top(probs, labels, count, selected_min):
         order = probs.argsort(descending=True)[:count]
         return [{"valor": labels[i], "probabilidad": float(probs[i]),
                  "seleccionado": float(probs[i]) >= selected_min} for i in order]
     type_probs = outputs["type"].softmax(dim=1)[0]
     return {
+        "device": "cpu",
+        "timing_ms": {
+            "model_load": round(model_load_ms, 2),
+            "preprocess": round(preprocess_ms, 2),
+            "inference": round(inference_ms, 2),
+            "total": round((time.perf_counter() - request_started) * 1000, 2),
+        },
         "tipo": top(type_probs, classes["tipo_prenda"], 3, float(type_probs.max())),
         "colores": top(outputs["color"].sigmoid()[0], classes["color"], 5, threshold),
         "estilos": top(outputs["style"].sigmoid()[0], classes["estilo"], 5, threshold),
@@ -421,6 +447,19 @@ def list_models() -> list[dict]:
     return models
 
 
+def continuation_command(run_id: str, strategy: str, model_dir: Path = MODEL_DIR) -> list[str]:
+    if not re.fullmatch(r"\d{8}-\d{6}", run_id):
+        raise ValueError("El ID de ejecución de origen no es válido.")
+    if strategy not in ("fine_tune", "heads_only"):
+        raise ValueError("La estrategia de continuación no es válida.")
+    if not (model_dir / "runs" / run_id / "best.pt").is_file():
+        raise FileNotFoundError(f"La ejecución {run_id} no tiene un mejor checkpoint para continuar.")
+    return [
+        sys.executable, "/app/train.py", "--config", "/app/configs/default.yaml",
+        "--continue-from", run_id, "--strategy", strategy,
+    ]
+
+
 def process_status() -> dict:
     with _lock:
         running = _process is not None and _process.poll() is None
@@ -433,14 +472,27 @@ def process_status() -> dict:
     return {"running": running, "pid": pid, "returncode": returncode, "log": log[-3000:]}
 
 
-def start_training() -> tuple[int, dict]:
+def start_training(
+    run_id: str | None = None,
+    strategy: str | None = None,
+) -> tuple[int, dict]:
     global _process
+    command = TRAIN_COMMAND
+    if run_id is not None:
+        try:
+            command = continuation_command(run_id, strategy or "", MODEL_DIR)
+        except ValueError as error:
+            return 400, {"error": str(error)}
+        except FileNotFoundError as error:
+            return 404, {"error": str(error)}
+    elif strategy is not None:
+        return 400, {"error": "Selecciona una ejecución para continuar."}
     with _lock:
         if _process is not None and _process.poll() is None:
             return 409, {"error": "Ya hay un entrenamiento en curso."}
         LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
         with LOG_PATH.open("wb") as log:
-            _process = subprocess.Popen(TRAIN_COMMAND, stdout=log, stderr=subprocess.STDOUT)
+            _process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT)
     return 200, {"ok": True}
 
 
@@ -507,6 +559,12 @@ class Handler(BaseHTTPRequestHandler):
             self._send(status, json.dumps(body).encode(), "application/json")
         elif self.path == "/api/start":
             status, body = start_training()
+            self._send(status, json.dumps(body).encode(), "application/json")
+        elif urlsplit(self.path).path == "/api/continue":
+            query = parse_qs(urlsplit(self.path).query)
+            status, body = start_training(
+                query.get("run", [""])[0], query.get("strategy", [""])[0]
+            )
             self._send(status, json.dumps(body).encode(), "application/json")
         elif self.path == "/api/stop":
             status, body = stop_training()
