@@ -609,7 +609,7 @@ def main() -> int:
             break
 
     if test_loader is not None:
-        model.load_state_dict(torch.load(run_dir / "best.pt", map_location=device)["state_dict"])
+        model.load_state_dict(torch.load(run_dir / "best.pt", map_location=device, weights_only=True)["state_dict"])
         test_metrics = evaluate(model, test_loader, device, config["multilabel_threshold"])
         (run_dir / "test_metrics.json").write_text(
             json.dumps(test_metrics, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
