@@ -96,13 +96,13 @@ El umbral por defecto proviene del checkpoint; se puede ajustar con `--threshold
 ### Requisitos y selección del modelo
 
 - VM Linux con Docker Engine y Docker Compose v2.
-- Un checkpoint `best.pt` compatible con `MobileNetV3-Small` y las clases guardadas en él. Para el historial descrito en esta guía, el checkpoint recomendado es `modelo-ia/runs/20261018-020637/best.pt`, cuyo mejor estado fue la época 15.
+- El checkpoint compartido [`modelos-compartidos/mobilenetv3-small-best.pt`](./modelos-compartidos/README.md), compatible con `MobileNetV3-Small` y con el catálogo de clases almacenado en el propio archivo.
 - Memoria y CPU suficientes para mantener el proceso y ejecutar inferencias. En el host de desarrollo medimos 12 CPU lógicas y 15 GiB RAM; esto no es un mínimo universal ni mide tiempo de entrenamiento.
 
 Desde `utilidades-entrenamiento/`, selecciona un checkpoint que exista en esa VM y levanta la API:
 
 ```bash
-export MODEL_CHECKPOINT="$PWD/modelo-ia/runs/20261018-020637/best.pt"
+export MODEL_CHECKPOINT="$PWD/modelos-compartidos/mobilenetv3-small-best.pt"
 export API_CPU_THREADS=4
 docker compose -f compose.cpu-api.yaml up -d --build
 ```

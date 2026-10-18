@@ -26,6 +26,7 @@
 /experiments/
 /results/
 *.pt
+!utilidades-entrenamiento/modelos-compartidos/mobilenetv3-small-best.pt
 *.pth
 *.onnx
 
