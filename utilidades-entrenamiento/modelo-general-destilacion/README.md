@@ -123,3 +123,49 @@ Las preguntas restantes se mantienen en [`dudas.md`](./dudas.md): confirmar el t
 ## Reparto del lote entre categorías
 
 Al aplicar el límite de imágenes nuevas, el curador no sigue el orden alfabético de las carpetas: prioriza las categorías con menos análisis aceptados hasta igualarlas (por ejemplo suéter, falda, short y pantalón antes que blusa o vestido). Así un lote de 5.000 no se consume solo con las primeras carpetas de AIG.
+
+## Propiedades guardadas en SQLite
+
+Al importar una imagen, los colores, estilos y temporadas propuestos por la IA se guardan en `valor_propiedad_prenda` (sin `unknown`; `summer` y `spring` se normalizan a `verano` y `primavera`), además del JSON de `descripcion_prenda.atributos_sugeridos`. La prenda sigue `pendiente` y sin `apta_para_entrenamiento`, así que `train.py` no la usa hasta que se apruebe. Para rellenar prendas importadas antes de este cambio, o tras un lote que corrió con código viejo:
+
+```bash
+docker compose run --rm --no-deps --entrypoint python curator /app/app.py sync-properties
+```
+
+## Galería de prendas
+
+`http://127.0.0.1:8787/galeria` (enlace "Galería de prendas" en el monitor) es una vista aparte que muestra
+cada imagen con sus propiedades generadas (color, estilo, temporada), descripción, proveedor/modelo, split y estado.
+Se navega de 15 en 15 (primera/anterior/números/siguiente/última, ir a página y flechas del teclado) y se puede
+filtrar por categoría y proveedor. Los datos salen de `valor_propiedad_prenda` y, como respaldo, de
+`descripcion_prenda.atributos_sugeridos`. API: `/api/gallery?page=&category=&provider=`.
+
+## Limpieza de imágenes duplicadas
+
+El dataset de origen (sobre todo `mendeley-aig`) trae la misma foto repetida con pequeñas variaciones, por lo que el
+SHA-256 no las detecta. Flujo:
+
+1. `docker compose -f compose.yml run --rm --no-deps --entrypoint python curator /app/app.py find-duplicates [--threshold 2]`
+   calcula un dHash de 64 bits por imagen (tabla `imagen_huella`) y agrupa las que están a distancia de Hamming
+   <= umbral (tablas `grupo_duplicado` y `grupo_duplicado_miembro`). Es repetible; solo recalcula los grupos pendientes.
+   Con umbral 6 el encadenamiento fusiona miles de imágenes distintas, por eso el valor por defecto es 2.
+2. `http://127.0.0.1:8787/duplicados` (botón "Duplicados" del monitor) muestra cada grupo. La imagen de mayor resolución
+   viene marcada para conservarse; haz clic en otra para cambiarla. "Dejar solo la verde y eliminar el resto" marca las demás
+   como `rechazado` con `apta_para_entrenamiento=0` (no borra archivos), "No son duplicadas" descarta el grupo y
+   "Deshacer" lo revierte. "Resolver toda la página" aplica la recomendada a los 10 grupos visibles.
+3. La galería oculta las prendas rechazadas y `train.py` solo usa aprobadas, así que el grupo deja una sola imagen.
+
+Respaldo previo a la limpieza: `respaldos/dataset-*/` (ignorado por git).
+
+### Borrado masivo de grupos grandes
+
+`app.py purge-duplicates --min-size 4` resuelve los grupos pendientes con al menos 4 imágenes: conserva la de mayor
+resolución, rechaza el resto y **borra sus archivos**. Las filas de `prenda_imagen` se conservan (prendas `rechazado`) para que
+su SHA-256 siga bloqueando futuras importaciones y análisis, de modo que no se vuelven a revisar. Estos grupos no se pueden
+deshacer desde la interfaz; restaura desde `respaldos/`. Los originales de `datos-crudos/` no se modifican.
+
+## Aprobación de lo generado
+
+`app.py approve-generated` pasa a `aprobado` con `apta_para_entrenamiento=1` toda prenda `pendiente` que ya tenga descripción
+generada (y aprueba esas descripciones). No toca las `rechazado`. Es repetible: ejecútalo de nuevo cuando terminen los lotes.
+Úsalo tras revisar una muestra manual de las descripciones.

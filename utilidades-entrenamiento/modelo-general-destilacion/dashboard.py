@@ -11,13 +11,17 @@ import threading
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 import app
+import duplicates
 
 
 ROOT = Path(__file__).resolve().parent
 HTML_FILE = ROOT / "dashboard.html"
+GALLERY_FILE = ROOT / "gallery.html"
+DUPLICATES_FILE = ROOT / "duplicates.html"
+GALLERY_PAGE_SIZE = 15
 ENV_FILE = ROOT / ".env"
 DATASET_ROOT = Path(os.environ.get("DATASET_ROOT", "/app/dataset")).resolve()
 DATABASE = DATASET_ROOT / "metadata.sqlite"
@@ -428,6 +432,95 @@ def estimate_completion(connection: sqlite3.Connection, current_count: int) -> d
     }
 
 
+def resolve_duplicates(payload: dict) -> dict:
+    items = payload.get("groups")
+    if not isinstance(items, list) or not items or len(items) > 200:
+        raise ValueError("Indica entre 1 y 200 grupos.")
+    rejected = 0
+    with connect_database() as connection:
+        for item in items:
+            rejected += duplicates.resolve_group(connection, int(item["group_id"]), int(item["keep"]))
+    return {"resolved": len(items), "rejected": rejected}
+
+
+def get_gallery(page: int, category: str | None, provider: str | None) -> dict:
+    where = ["p.estado_revision != 'rechazado'"]
+    params: list = []
+    if category:
+        where.append("p.ruta_categoria = ?")
+        params.append(category)
+    if provider:
+        where.append("d.proveedor = ?")
+        params.append(provider)
+    clause = f"WHERE {' AND '.join(where)}" if where else ""
+    base = f"""
+        FROM prenda p
+        LEFT JOIN descripcion_prenda d ON d.id_descripcion = (
+            SELECT MAX(d2.id_descripcion) FROM descripcion_prenda d2
+            WHERE d2.id_prenda = p.id_prenda
+        )
+        {clause}
+    """
+    with connect_database() as connection:
+        total = connection.execute(f"SELECT COUNT(*) {base}", params).fetchone()[0]
+        pages = max(1, -(-total // GALLERY_PAGE_SIZE))
+        page = min(max(page, 1), pages)
+        rows = connection.execute(
+            f"""
+            SELECT p.id_prenda, p.codigo, p.ruta_categoria, p.split, p.estado_revision,
+                   d.texto, d.proveedor, d.modelo, d.atributos_sugeridos
+            {base}
+            ORDER BY p.id_prenda DESC LIMIT ? OFFSET ?
+            """,
+            [*params, GALLERY_PAGE_SIZE, (page - 1) * GALLERY_PAGE_SIZE],
+        ).fetchall()
+        ids = [row["id_prenda"] for row in rows]
+        stored: dict[int, dict[str, list]] = {i: {} for i in ids}
+        if ids:
+            marks = ",".join("?" for _ in ids)
+            for row in connection.execute(
+                f"""
+                SELECT v.id_prenda, c.codigo, v.valor
+                FROM valor_propiedad_prenda v
+                JOIN catalogo_propiedad c ON c.id_propiedad = v.id_propiedad
+                WHERE v.id_prenda IN ({marks}) ORDER BY c.codigo, v.valor
+                """,
+                ids,
+            ):
+                stored[row["id_prenda"]].setdefault(row["codigo"], []).append(row["valor"])
+        categories = [
+            row[0] for row in connection.execute(
+                "SELECT DISTINCT ruta_categoria FROM prenda WHERE estado_revision != 'rechazado' ORDER BY 1"
+            )
+        ]
+    items = []
+    for row in rows:
+        try:
+            suggested = json.loads(row["atributos_sugeridos"] or "{}")
+        except json.JSONDecodeError:
+            suggested = {}
+        props = stored[row["id_prenda"]]
+        for code, key in (("color", "colores"), ("estilo", "estilos"), ("temporada", "temporadas")):
+            extra = [v for v in suggested.get(key, []) if isinstance(v, str)]
+            props[code] = list(dict.fromkeys([*props.get(code, []), *extra]))
+        items.append({
+            "id": row["id_prenda"],
+            "codigo": row["codigo"],
+            "categoria": row["ruta_categoria"],
+            "split": row["split"],
+            "estado": row["estado_revision"],
+            "descripcion": row["texto"],
+            "proveedor": row["proveedor"],
+            "modelo": row["modelo"],
+            "propiedades": props,
+            "imagen_url": f"/api/image/{row['id_prenda']}",
+        })
+    return {
+        "page": page, "pages": pages, "total": total,
+        "page_size": GALLERY_PAGE_SIZE, "categories": categories, "items": items,
+    }
+
+
 def get_overview() -> dict:
     with connect_database() as connection:
         counts = {category: 0 for category in app.CATEGORY_PATHS}
@@ -437,14 +530,14 @@ def get_overview() -> dict:
             FROM prenda p
             JOIN valor_propiedad_prenda v ON v.id_prenda = p.id_prenda
             JOIN catalogo_propiedad c ON c.id_propiedad = v.id_propiedad
-            WHERE c.codigo = 'tipo_prenda'
+            WHERE c.codigo = 'tipo_prenda' AND p.estado_revision != 'rechazado'
             GROUP BY v.valor
             """
         ).fetchall()
         for row in rows:
             if row["categoria"] in counts:
                 counts[row["categoria"]] = row["cantidad"]
-        total = connection.execute("SELECT COUNT(*) FROM prenda").fetchone()[0]
+        total = connection.execute("SELECT COUNT(*) FROM prenda WHERE estado_revision != 'rechazado'").fetchone()[0]
 
         recent_rows = connection.execute(
             """
@@ -458,6 +551,7 @@ def get_overview() -> dict:
                 FROM descripcion_prenda d2
                 WHERE d2.id_prenda = p.id_prenda
             )
+            WHERE p.estado_revision != 'rechazado'
             ORDER BY p.id_prenda DESC, i.id_imagen DESC
             LIMIT 5
             """
@@ -751,6 +845,40 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(body)
                 return
+            if path in ("/galeria", "/galeria/", "/duplicados", "/duplicados/"):
+                body = (DUPLICATES_FILE if "duplicados" in path else GALLERY_FILE).read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'")
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            if path == "/api/duplicates":
+                query = parse_qs(urlsplit(self.path).query)
+                try:
+                    page = int(query.get("page", ["1"])[0])
+                except ValueError:
+                    page = 1
+                state = query.get("estado", ["pendiente"])[0]
+                if state not in ("pendiente", "resuelto", "descartado"):
+                    state = "pendiente"
+                with connect_database() as connection:
+                    self._send_json(200, duplicates.list_groups(connection, page, state))
+                return
+            if path == "/api/gallery":
+                query = parse_qs(urlsplit(self.path).query)
+                try:
+                    page = int(query.get("page", ["1"])[0])
+                except ValueError:
+                    page = 1
+                self._send_json(200, get_gallery(
+                    page,
+                    query.get("category", [""])[0] or None,
+                    query.get("provider", [""])[0] or None,
+                ))
+                return
             if path == "/api/overview":
                 self._send_json(200, get_overview())
                 return
@@ -861,6 +989,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send_json(200, {"saved": True})
             elif path == "/api/credentials":
                 self._save_credentials(payload)
+                self._send_json(200, {"saved": True})
+            elif path == "/api/duplicates/resolve":
+                self._send_json(200, resolve_duplicates(payload))
+            elif path == "/api/duplicates/dismiss":
+                with connect_database() as connection:
+                    duplicates.dismiss_group(connection, int(payload.get("group_id", 0)))
+                self._send_json(200, {"saved": True})
+            elif path == "/api/duplicates/undo":
+                with connect_database() as connection:
+                    duplicates.undo_group(connection, int(payload.get("group_id", 0)))
                 self._send_json(200, {"saved": True})
             elif path == "/api/ingest":
                 self._send_json(202, start_ingest(payload))

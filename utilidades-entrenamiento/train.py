@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import hashlib
 import json
 import random
 import sqlite3
@@ -91,7 +92,7 @@ def load_config(path: Path) -> dict:
     required = (
         "dataset_root", "database", "model_dir", "image_size", "batch_size",
         "epochs", "learning_rate", "num_workers", "pretrained",
-        "unfreeze_last_block", "seed", "multilabel_threshold",
+        "seed", "multilabel_threshold",
     )
     missing = [key for key in required if key not in config]
     if missing:
@@ -228,6 +229,8 @@ def load_samples(database: Path, dataset_root: Path) -> tuple[dict, dict]:
         for image_path in image_paths:
             samples_by_split[garment["split"]].append({
                 "path": image_path,
+                "codigo": garment["codigo"],
+                "ruta_relativa": image_path.relative_to(dataset_root).as_posix(),
                 "type_index": type_index[garment_type],
                 "color_target": color_target,
                 "style_target": style_target,
@@ -246,9 +249,17 @@ def load_samples(database: Path, dataset_root: Path) -> tuple[dict, dict]:
     }
 
 
-def build_transform(image_size: int) -> transforms.Compose:
+def build_transform(image_size: int, augment: bool = False) -> transforms.Compose:
+    if augment:
+        steps = [
+            transforms.RandomResizedCrop(image_size, scale=(0.7, 1.0), ratio=(0.85, 1.15)),
+            transforms.RandomHorizontalFlip(),
+            transforms.ColorJitter(brightness=0.2, contrast=0.2),
+        ]
+    else:
+        steps = [transforms.Resize((image_size, image_size))]
     return transforms.Compose([
-        transforms.Resize((image_size, image_size)),
+        *steps,
         transforms.ToTensor(),
         transforms.Normalize(
             mean=(0.485, 0.456, 0.406),
@@ -269,9 +280,16 @@ def move_batch(batch: tuple, device: torch.device) -> tuple:
     )
 
 
-def compute_loss(outputs: dict, batch: tuple) -> torch.Tensor:
+def compute_loss(
+    outputs: dict,
+    batch: tuple,
+    type_weights: torch.Tensor | None = None,
+    label_smoothing: float = 0.0,
+) -> torch.Tensor:
     _, type_targets, color_targets, style_targets, has_colors, has_styles = batch
-    loss = nn.functional.cross_entropy(outputs["type"], type_targets)
+    loss = nn.functional.cross_entropy(
+        outputs["type"], type_targets, weight=type_weights, label_smoothing=label_smoothing
+    )
     if has_colors.any():
         loss = loss + nn.functional.binary_cross_entropy_with_logits(
             outputs["color"][has_colors], color_targets[has_colors]
@@ -363,34 +381,98 @@ def evaluate(
     }
 
 
+def set_backbone_trainable(model: MultiTaskMobileNet, trainable: bool) -> None:
+    for parameter in model.backbone.parameters():
+        parameter.requires_grad = trainable
+
+
 def train_epoch(
     model: MultiTaskMobileNet,
     loader: DataLoader,
     optimizer: torch.optim.Optimizer,
     device: torch.device,
-    unfreeze_last_block: bool,
+    scaler: torch.amp.GradScaler,
+    backbone_trainable: bool,
+    type_weights: torch.Tensor | None,
+    label_smoothing: float,
+    progress_path: Path,
+    epoch: int,
 ) -> float:
     model.train()
-    if not unfreeze_last_block:
+    if not backbone_trainable:
         model.backbone.features.eval()
-    else:
-        model.backbone.features.eval()
-        model.backbone.features[-1].train()
     total_loss = 0.0
     total = 0
-    for raw_batch in loader:
+    for step, raw_batch in enumerate(loader, 1):
         batch = move_batch(raw_batch, device)
         optimizer.zero_grad(set_to_none=True)
-        outputs = model(batch[0])
-        loss = compute_loss(outputs, batch)
-        loss.backward()
-        optimizer.step()
+        with torch.autocast(device_type=device.type, enabled=scaler.is_enabled()):
+            outputs = model(batch[0])
+            loss = compute_loss(outputs, batch, type_weights, label_smoothing)
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
         batch_size = batch[0].shape[0]
         total_loss += float(loss.item()) * batch_size
         total += batch_size
+        if step % 20 == 0 or step == len(loader):
+            progress_path.write_text(json.dumps({
+                "epoch": epoch, "batch": step, "batches": len(loader),
+                "loss": total_loss / total, "updated": datetime.now().isoformat(timespec="seconds"),
+            }), encoding="utf-8")
     if total == 0:
         raise ValueError("No hay datos para entrenar.")
     return total_loss / total
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def register_run(
+    ledger_path: Path, run_id: str, config: dict, samples_by_split: dict, database: Path
+) -> None:
+    """Registra en un SQLite aparte qué imágenes entran en cada ejecución."""
+    ledger_path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(ledger_path) as ledger:
+        ledger.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS ejecucion (
+                run_id TEXT PRIMARY KEY,
+                fecha TEXT NOT NULL,
+                config_json TEXT NOT NULL,
+                sha256_metadata TEXT NOT NULL,
+                mejor_checkpoint TEXT
+            );
+            CREATE TABLE IF NOT EXISTS imagen_entrenamiento (
+                run_id TEXT NOT NULL REFERENCES ejecucion(run_id),
+                split TEXT NOT NULL CHECK (split IN ('train', 'val', 'test')),
+                codigo TEXT NOT NULL,
+                ruta_relativa TEXT NOT NULL,
+                sha256 TEXT NOT NULL,
+                PRIMARY KEY (run_id, ruta_relativa)
+            );
+            CREATE INDEX IF NOT EXISTS idx_imagen_sha ON imagen_entrenamiento(sha256);
+            """
+        )
+        previous = {row[0] for row in ledger.execute("SELECT DISTINCT sha256 FROM imagen_entrenamiento")}
+        ledger.execute(
+            "INSERT INTO ejecucion (run_id, fecha, config_json, sha256_metadata) VALUES (?, ?, ?, ?)",
+            (run_id, datetime.now().isoformat(timespec="seconds"),
+             json.dumps(config, ensure_ascii=False, default=str), file_sha256(database)),
+        )
+        rows = [
+            (run_id, split, sample["codigo"], sample["ruta_relativa"], file_sha256(sample["path"]))
+            for split, samples in samples_by_split.items()
+            for sample in samples
+        ]
+        ledger.executemany("INSERT INTO imagen_entrenamiento VALUES (?, ?, ?, ?, ?)", rows)
+    new = sum(1 for row in rows if row[4] not in previous)
+    print(f"Registro: {len(rows)} imágenes en {run_id}; nuevas respecto a ejecuciones previas: {new}", flush=True)
 
 
 def main() -> int:
@@ -417,21 +499,34 @@ def main() -> int:
     dataset_root = Path(config["dataset_root"])
     database = Path(config["database"])
     samples_by_split, classes = load_samples(database, dataset_root)
-    transform = build_transform(config["image_size"])
+    use_cuda = device.type == "cuda"
+    eval_transform = build_transform(config["image_size"])
+    train_transform = build_transform(config["image_size"], config.get("augment", True))
     generator = torch.Generator().manual_seed(config["seed"])
+    loader_options = {
+        "batch_size": config["batch_size"],
+        "num_workers": config["num_workers"],
+        "pin_memory": use_cuda,
+        "persistent_workers": config["num_workers"] > 0,
+    }
     train_loader = DataLoader(
-        GarmentImages(samples_by_split["train"], transform),
-        batch_size=config["batch_size"],
-        shuffle=True,
-        num_workers=config["num_workers"],
-        generator=generator,
+        GarmentImages(samples_by_split["train"], train_transform),
+        shuffle=True, generator=generator, drop_last=True, **loader_options,
     )
     validation_loader = DataLoader(
-        GarmentImages(samples_by_split["val"], transform),
-        batch_size=config["batch_size"],
-        shuffle=False,
-        num_workers=config["num_workers"],
+        GarmentImages(samples_by_split["val"], eval_transform), shuffle=False, **loader_options
     )
+    test_loader = DataLoader(
+        GarmentImages(samples_by_split["test"], eval_transform), shuffle=False, **loader_options
+    ) if samples_by_split["test"] else None
+
+    type_weights = None
+    if config.get("class_weighted", True):
+        counts = torch.zeros(len(classes["tipo_prenda"]))
+        for sample in samples_by_split["train"]:
+            counts[sample["type_index"]] += 1
+        type_weights = (counts.sum() / (len(counts) * counts.clamp(min=1))).sqrt().to(device)
+    label_smoothing = float(config.get("label_smoothing", 0.05))
 
     model = MultiTaskMobileNet(
         type_count=len(classes["tipo_prenda"]),
@@ -439,16 +534,24 @@ def main() -> int:
         style_count=len(classes["estilo"]),
         pretrained=config["pretrained"],
     )
-    for parameter in model.backbone.features.parameters():
-        parameter.requires_grad = False
-    if config["unfreeze_last_block"]:
-        for parameter in model.backbone.features[-1].parameters():
-            parameter.requires_grad = True
     model.to(device)
-    optimizer = torch.optim.Adam(
-        (parameter for parameter in model.parameters() if parameter.requires_grad),
-        lr=config["learning_rate"],
+
+    # Fase 1: solo cabezas; fase 2: ajuste fino de toda la base con lr menor.
+    warmup_epochs = min(int(config.get("warmup_epochs", 0)), config["epochs"])
+    finetune = bool(config.get("finetune", False))
+    head_params = [
+        p for m in (model.type_head, model.color_head, model.style_head) for p in m.parameters()
+    ]
+    set_backbone_trainable(model, finetune and warmup_epochs == 0)
+    optimizer = torch.optim.AdamW(
+        [
+            {"params": head_params, "lr": config["learning_rate"]},
+            {"params": model.backbone.parameters(), "lr": config.get("finetune_lr", 1e-4)},
+        ],
+        weight_decay=config.get("weight_decay", 1e-4),
     )
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config["epochs"])
+    scaler = torch.amp.GradScaler(enabled=use_cuda and config.get("amp", True))
 
     run_id = datetime.now().strftime("%Y%m%d-%H%M%S")
     run_dir = Path(config["model_dir"]) / run_id
@@ -459,27 +562,33 @@ def main() -> int:
     )
     history = []
     best_loss = float("inf")
+    stale = 0
+    patience = int(config.get("early_stopping_patience", 5))
+    ledger_path = Path(config.get("ledger", "/app/modelo-ia/registro_entrenamiento.sqlite"))
+    register_run(ledger_path, run_id, config, samples_by_split, database)
     print(
         f"Dispositivo: {device}; imágenes train={len(samples_by_split['train'])}, "
-        f"val={len(samples_by_split['val'])}; clases tipo={len(classes['tipo_prenda'])}",
+        f"val={len(samples_by_split['val'])}, test={len(samples_by_split['test'])}; "
+        f"clases tipo={len(classes['tipo_prenda'])}",
         flush=True,
     )
 
     for epoch in range(1, config["epochs"] + 1):
+        if finetune and epoch == warmup_epochs + 1:
+            set_backbone_trainable(model, True)
         train_loss = train_epoch(
-            model, train_loader, optimizer, device, config["unfreeze_last_block"]
+            model, train_loader, optimizer, device, scaler,
+            finetune and epoch > warmup_epochs, type_weights, label_smoothing,
+            run_dir / "progress.json", epoch,
         )
-        validation = evaluate(
-            model,
-            validation_loader,
-            device,
-            config["multilabel_threshold"],
-        )
+        scheduler.step()
+        validation = evaluate(model, validation_loader, device, config["multilabel_threshold"])
         metrics = {"epoch": epoch, "train_loss": train_loss, "validation": validation}
         history.append(metrics)
         print(json.dumps(metrics, ensure_ascii=False), flush=True)
         if validation["loss"] < best_loss:
             best_loss = validation["loss"]
+            stale = 0
             torch.save({
                 "state_dict": model.state_dict(),
                 "classes": classes,
@@ -489,11 +598,33 @@ def main() -> int:
                 "epoch": epoch,
                 "validation": validation,
             }, run_dir / "best.pt")
+        else:
+            stale += 1
         (run_dir / "metrics.json").write_text(
             json.dumps(history, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
+        if epoch > warmup_epochs and stale >= patience:
+            print(f"Parada temprana en la época {epoch}.", flush=True)
+            break
 
+    if test_loader is not None:
+        model.load_state_dict(torch.load(run_dir / "best.pt", map_location=device)["state_dict"])
+        test_metrics = evaluate(model, test_loader, device, config["multilabel_threshold"])
+        (run_dir / "test_metrics.json").write_text(
+            json.dumps(test_metrics, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
+        print(json.dumps({"test": test_metrics}, ensure_ascii=False), flush=True)
+
+    with sqlite3.connect(ledger_path) as ledger:
+        ledger.execute(
+            "UPDATE ejecucion SET mejor_checkpoint = ? WHERE run_id = ?",
+            (str(run_dir / "best.pt"), run_id),
+        )
+    (run_dir / "progress.json").write_text(
+        json.dumps({"finished": True, "updated": datetime.now().isoformat(timespec="seconds")}),
+        encoding="utf-8",
+    )
     print(f"Mejor checkpoint: {run_dir / 'best.pt'}", flush=True)
     return 0
 

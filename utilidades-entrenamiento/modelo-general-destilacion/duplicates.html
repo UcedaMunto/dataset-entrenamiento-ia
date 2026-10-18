@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Imágenes duplicadas</title>
+  <style>
+    :root { color-scheme: dark; --bg:#10151d; --panel:#1a2330; --line:#2c3949; --text:#eef3f8; --muted:#a8b5c5; --accent:#64d7b0; --warn:#ff8f8f }
+    * { box-sizing:border-box }
+    body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui,sans-serif }
+    header { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:12px; padding:16px max(16px,calc((100vw - 1280px)/2)); border-bottom:1px solid var(--line); background:#131b25; position:sticky; top:0; z-index:2 }
+    h1 { font-size:20px; margin:0 } a { color:var(--accent) }
+    main { max-width:1280px; margin:18px auto; padding:0 16px 40px }
+    .bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center }
+    select, input, button { color:var(--text); background:#101720; border:1px solid #405064; border-radius:8px; padding:8px 11px; font:inherit }
+    input[type=number] { width:80px }
+    button { background:#263547; cursor:pointer } button:hover:not(:disabled) { border-color:var(--accent) } button:disabled { opacity:.4; cursor:default }
+    button.primary { background:#14644f; border-color:#218c6d }
+    button.danger { background:#6b2323; border-color:#a33 }
+    .muted { color:var(--muted) }
+    .group { border:1px solid var(--line); border-radius:12px; background:var(--panel); padding:12px; margin:14px 0 }
+    .ghead { display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:space-between; margin-bottom:10px }
+    .members { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:10px }
+    .member { border:2px solid var(--line); border-radius:10px; padding:6px; cursor:pointer; background:#101720; min-width:0 }
+    .member.keep { border-color:var(--accent) } .member.drop { opacity:.55; border-color:#7a3a3a }
+    .member img { width:100%; height:170px; object-fit:contain; background:#0e131a; border-radius:6px }
+    .member small { display:block; overflow-wrap:anywhere; color:var(--muted) }
+    .tag { font-weight:600 } .keep .tag { color:var(--accent) } .drop .tag { color:var(--warn) }
+    .pager { display:flex; flex-wrap:wrap; gap:6px; align-items:center; justify-content:center; margin:10px 0 }
+    .done { opacity:.7 }
+  </style>
+</head>
+<body>
+<header>
+  <div><h1>Imágenes duplicadas</h1><div class="muted" id="summary">Cargando…</div></div>
+  <div class="bar">
+    <select id="estado" aria-label="Estado">
+      <option value="pendiente">Pendientes</option><option value="resuelto">Resueltos</option><option value="descartado">Descartados</option>
+    </select>
+    <button id="all" class="primary" title="Conserva la recomendada de cada grupo de esta página">Resolver toda la página</button>
+    <a href="/galeria">Galería</a> <a href="/">← Monitor</a>
+  </div>
+</header>
+<main>
+  <div class="pager" id="pagerTop"></div>
+  <div id="list"></div>
+  <div class="pager" id="pagerBottom"></div>
+</main>
+<script>
+  const state = { page: 1, pages: 1, groups: [], keep: {} };
+  const $ = id => document.getElementById(id);
+  const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; };
+  async function post(path, body) {
+    const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Error");
+    return data;
+  }
+
+  function groupCard(group) {
+    const pending = $("estado").value === "pendiente";
+    const box = el("section", "group" + (pending ? "" : " done"));
+    const head = el("div", "ghead");
+    head.append(el("strong", "", `Grupo ${group.id} · ${group.miembros.length} imágenes`));
+    const actions = el("div", "bar");
+    if (pending) {
+      const ok = el("button", "danger", "Dejar solo la verde y eliminar el resto");
+      ok.addEventListener("click", () => run(() => post("/api/duplicates/resolve", { groups: [{ group_id: group.id, keep: state.keep[group.id] }] })));
+      const no = el("button", "", "No son duplicadas");
+      no.addEventListener("click", () => run(() => post("/api/duplicates/dismiss", { group_id: group.id })));
+      actions.append(ok, no);
+    } else {
+      const undo = el("button", "", "Deshacer");
+      undo.addEventListener("click", () => run(() => post("/api/duplicates/undo", { group_id: group.id })));
+      actions.append(undo);
+    }
+    head.append(actions); box.append(head);
+    const grid = el("div", "members");
+    group.miembros.forEach(m => {
+      const kept = pending ? state.keep[group.id] === m.id : group.recomendada === m.id;
+      const card = el("div", "member " + (kept ? "keep" : "drop"));
+      const img = el("img"); img.src = m.imagen_url; img.loading = "lazy"; img.alt = m.codigo;
+      card.append(img, el("span", "tag", kept ? "SE CONSERVA" : (pending ? "SE ELIMINA" : m.estado)), el("small", "", `${m.ancho}×${m.alto} · ${m.split} · ${m.categoria}`), el("small", "", m.codigo));
+      if (pending) card.addEventListener("click", () => { state.keep[group.id] = m.id; render(); });
+      grid.append(card);
+    });
+    box.append(grid);
+    return box;
+  }
+
+  function pager(target) {
+    target.replaceChildren();
+    const add = (label, page) => { const b = el("button", page === state.page ? "primary" : "", label); b.disabled = page < 1 || page > state.pages; b.addEventListener("click", () => load(page)); target.append(b); };
+    add("« Primera", 1); add("‹ Anterior", state.page - 1);
+    const from = Math.max(1, state.page - 3), to = Math.min(state.pages, state.page + 3);
+    for (let p = from; p <= to; p++) add(String(p), p);
+    add("Siguiente ›", state.page + 1); add("Última »", state.pages);
+  }
+
+  function render() {
+    $("list").replaceChildren(...state.groups.map(groupCard));
+    if (!state.groups.length) $("list").append(el("p", "muted", "No hay grupos en este estado."));
+    pager($("pagerTop")); pager($("pagerBottom"));
+  }
+
+  async function run(action) {
+    try { await action(); await load(state.page); } catch (error) { alert(error.message); }
+  }
+
+  async function load(page) {
+    const data = await (await fetch(`/api/duplicates?page=${page || 1}&estado=${$("estado").value}`)).json();
+    state.page = data.page; state.pages = data.pages; state.groups = data.grupos;
+    state.keep = Object.fromEntries(data.grupos.map(g => [g.id, g.recomendada]));
+    $("summary").textContent = `${data.pendientes.toLocaleString("es")} grupos pendientes (${data.sobrantes.toLocaleString("es")} imágenes sobrantes) · ${data.resueltos} resueltos · ${data.descartados} descartados · página ${data.page} de ${data.pages}`;
+    $("all").style.display = data.estado === "pendiente" ? "" : "none";
+    render(); window.scrollTo({ top: 0 });
+  }
+
+  $("all").addEventListener("click", () => {
+    if (!state.groups.length || !confirm(`Se conservará una imagen en cada uno de los ${state.groups.length} grupos y el resto se rechazará. ¿Continuar?`)) return;
+    run(() => post("/api/duplicates/resolve", { groups: state.groups.map(g => ({ group_id: g.id, keep: state.keep[g.id] })) }));
+  });
+  $("estado").addEventListener("change", () => load(1));
+  load(1);
+</script>
+</body>
+</html>

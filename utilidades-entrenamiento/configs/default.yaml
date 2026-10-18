@@ -2,12 +2,26 @@ dataset_root: /app/dataset
 database: /app/dataset/metadata.sqlite
 model_dir: /app/modelo-ia/runs
 
-image_size: 160
-batch_size: 2
-epochs: 15
+# 224 px es la resolución nativa de los pesos ImageNet de MobileNetV3-Small.
+image_size: 224
+batch_size: 64
+epochs: 30
 learning_rate: 0.001
-num_workers: 0
+num_workers: 8
 pretrained: true
-unfreeze_last_block: false
 seed: 42
 multilabel_threshold: 0.5
+
+# Fase 1: solo cabezas (warmup_epochs); fase 2: ajuste fino de toda la base con finetune_lr.
+finetune: true
+warmup_epochs: 3
+finetune_lr: 0.0001
+weight_decay: 0.0001
+augment: true
+class_weighted: true
+label_smoothing: 0.05
+amp: true
+early_stopping_patience: 5
+
+# Registro de imágenes usadas por ejecución (SQLite aparte; el dataset es de solo lectura).
+ledger: /app/modelo-ia/registro_entrenamiento.sqlite

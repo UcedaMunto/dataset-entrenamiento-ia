@@ -8,7 +8,7 @@ WORKDIR /app
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
-COPY app.py dashboard.py dashboard.html sources.json /app/
+COPY app.py dashboard.py duplicates.py dashboard.html gallery.html duplicates.html sources.json /app/
 COPY tests/ /app/tests/
 
 ENTRYPOINT ["python", "/app/app.py"]

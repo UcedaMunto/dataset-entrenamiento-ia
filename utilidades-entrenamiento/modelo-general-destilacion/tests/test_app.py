@@ -269,6 +269,25 @@ class CurationPipelineTests(unittest.TestCase):
         self.assertEqual(annotate.call_count, 2)
         self.assertEqual(unavailable_models, set())
 
+    def test_suggested_properties_are_persisted_and_normalized(self):
+        with sqlite3.connect(self.database) as connection:
+            connection.execute(
+                "INSERT INTO prenda (codigo, ruta_categoria, split, estado_revision, apta_para_entrenamiento) "
+                "VALUES ('P1', 'superior/camisas', 'train', 'pendiente', 0)"
+            )
+            garment_id = connection.execute("SELECT id_prenda FROM prenda").fetchone()[0]
+            attributes = {"colores": ["azul", "unknown"], "estilos": ["casual"], "temporadas": ["summer", "otoño"]}
+            self.assertEqual(app.persist_suggested_properties(connection, garment_id, attributes), 4)
+            self.assertEqual(app.persist_suggested_properties(connection, garment_id, attributes), 0)
+            rows = connection.execute(
+                "SELECT c.codigo, v.valor FROM valor_propiedad_prenda v "
+                "JOIN catalogo_propiedad c USING (id_propiedad) ORDER BY 1, 2"
+            ).fetchall()
+        self.assertEqual(
+            rows,
+            [("color", "azul"), ("estilo", "casual"), ("temporada", "otoño"), ("temporada", "verano")],
+        )
+
     def test_batch_limit_prioritizes_least_represented_categories(self):
         def plan(category, index):
             return ("s", {}, {"category": category, "digest": f"{category}{index}"})

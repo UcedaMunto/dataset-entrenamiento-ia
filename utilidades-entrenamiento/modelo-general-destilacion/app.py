@@ -138,6 +138,28 @@ def parse_args() -> argparse.Namespace:
     audit = subparsers.add_parser("audit", help="Cuenta imágenes y etiquetas; no modifica archivos.")
     audit.add_argument("--source", default="all")
 
+    subparsers.add_parser(
+        "sync-properties",
+        help="Copia colores, estilos y temporadas sugeridos a valor_propiedad_prenda.",
+    )
+
+    duplicates = subparsers.add_parser(
+        "find-duplicates",
+        help="Calcula huellas perceptuales y agrupa imágenes casi duplicadas.",
+    )
+    duplicates.add_argument("--threshold", type=int, default=2, help="Distancia de Hamming máxima (0-64).")
+
+    purge = subparsers.add_parser(
+        "purge-duplicates",
+        help="Resuelve grupos duplicados grandes y borra los archivos sobrantes.",
+    )
+    purge.add_argument("--min-size", type=int, default=4, help="Tamaño mínimo del grupo.")
+
+    subparsers.add_parser(
+        "approve-generated",
+        help="Aprueba las prendas no rechazadas que ya tienen descripción generada.",
+    )
+
     ingest = subparsers.add_parser("ingest", help="Copia imágenes y registra metadatos.")
     ingest.add_argument("--source", default="all")
     ingest.add_argument("--execute", action="store_true", help="Confirma escrituras en dataset/ y SQLite.")
@@ -1252,7 +1274,68 @@ def import_one(
                 model,
             ),
         )
+        persist_suggested_properties(connection, garment_id, attributes)
     return True
+
+
+PROPERTY_FIELDS = (("color", "colores"), ("estilo", "estilos"), ("temporada", "temporadas"))
+PROPERTY_ALIASES = {"summer": "verano", "spring": "primavera"}
+PROPERTY_SKIPPED_VALUES = {"unknown", ""}
+
+
+def persist_suggested_properties(
+    connection: sqlite3.Connection, garment_id: int, attributes: dict
+) -> int:
+    """Guarda colores, estilos y temporadas sugeridos como propiedades de la prenda."""
+    inserted = 0
+    for code, key in PROPERTY_FIELDS:
+        row = connection.execute(
+            "SELECT id_propiedad FROM catalogo_propiedad WHERE codigo = ?", (code,)
+        ).fetchone()
+        if row is None:
+            continue
+        values = attributes.get(key) or []
+        if not isinstance(values, list):
+            continue
+        normalized = []
+        for value in values:
+            if not isinstance(value, str):
+                continue
+            value = PROPERTY_ALIASES.get(value.strip().lower(), value.strip().lower())
+            if value not in PROPERTY_SKIPPED_VALUES and value not in normalized:
+                normalized.append(value)
+        for value in normalized:
+            exists = connection.execute(
+                "SELECT 1 FROM valor_propiedad_prenda "
+                "WHERE id_prenda = ? AND id_propiedad = ? AND valor = ?",
+                (garment_id, row[0], value),
+            ).fetchone()
+            if exists is None:
+                connection.execute(
+                    "INSERT INTO valor_propiedad_prenda (id_prenda, id_propiedad, valor) "
+                    "VALUES (?, ?, ?)",
+                    (garment_id, row[0], value),
+                )
+                inserted += 1
+    return inserted
+
+
+def command_sync_properties(database: Path) -> int:
+    with sqlite3.connect(database, timeout=60) as connection:
+        rows = connection.execute(
+            "SELECT id_prenda, atributos_sugeridos FROM descripcion_prenda "
+            "WHERE atributos_sugeridos IS NOT NULL"
+        ).fetchall()
+        inserted = 0
+        for garment_id, raw in rows:
+            try:
+                attributes = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(attributes, dict):
+                inserted += persist_suggested_properties(connection, garment_id, attributes)
+    print(f"Propiedades sincronizadas desde {len(rows)} descripciones; filas nuevas={inserted}.")
+    return 0
 
 
 def balance_plans_by_category(
@@ -1717,6 +1800,36 @@ def main() -> int:
     CANCEL_REQUESTED.clear()
     install_cancellation_handler()
     args = parse_args()
+    if args.command == "sync-properties":
+        return command_sync_properties(
+            Path(os.environ.get("DATASET_ROOT", "/app/dataset")).resolve() / "metadata.sqlite"
+        )
+    if args.command == "approve-generated":
+        root = Path(os.environ.get("DATASET_ROOT", "/app/dataset")).resolve()
+        with sqlite3.connect(root / "metadata.sqlite", timeout=60) as connection:
+            garments = connection.execute(
+                "UPDATE prenda SET estado_revision = 'aprobado', apta_para_entrenamiento = 1 "
+                "WHERE estado_revision = 'pendiente' "
+                "AND EXISTS (SELECT 1 FROM descripcion_prenda d WHERE d.id_prenda = prenda.id_prenda)"
+            ).rowcount
+            descriptions = connection.execute(
+                "UPDATE descripcion_prenda SET estado_revision = 'aprobado' WHERE estado_revision = 'pendiente' "
+                "AND id_prenda IN (SELECT id_prenda FROM prenda WHERE estado_revision = 'aprobado')"
+            ).rowcount
+        print(f"Prendas aprobadas: {garments}. Descripciones aprobadas: {descriptions}.")
+        return 0
+    if args.command == "purge-duplicates":
+        import duplicates
+
+        root = Path(os.environ.get("DATASET_ROOT", "/app/dataset")).resolve()
+        groups, rejected, files = duplicates.purge_large_groups(root / "metadata.sqlite", root, args.min_size)
+        print(f"Grupos resueltos: {groups}. Prendas rechazadas: {rejected}. Archivos eliminados: {files}.")
+        return 0
+    if args.command == "find-duplicates":
+        import duplicates
+
+        root = Path(os.environ.get("DATASET_ROOT", "/app/dataset")).resolve()
+        return duplicates.command_find_duplicates(root / "metadata.sqlite", root, args.threshold)
     sources = load_sources()
     selected = select_sources(sources, args.source)
     if args.command == "audit":

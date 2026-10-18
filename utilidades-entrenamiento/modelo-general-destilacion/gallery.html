@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Galería de prendas</title>
+  <style>
+    :root { color-scheme: dark; --bg:#10151d; --panel:#1a2330; --line:#2c3949; --text:#eef3f8; --muted:#a8b5c5; --accent:#64d7b0 }
+    * { box-sizing:border-box }
+    body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui,sans-serif }
+    header { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:12px; padding:16px max(16px,calc((100vw - 1280px)/2)); border-bottom:1px solid var(--line); background:#131b25; position:sticky; top:0; z-index:2 }
+    h1 { font-size:20px; margin:0 } a { color:var(--accent) }
+    main { max-width:1280px; margin:18px auto; padding:0 16px 40px }
+    .bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center }
+    select, input, button { color:var(--text); background:#101720; border:1px solid #405064; border-radius:8px; padding:8px 11px; font:inherit }
+    input[type=number] { width:80px }
+    button { background:#263547; cursor:pointer } button:hover:not(:disabled) { border-color:var(--accent) } button:disabled { opacity:.4; cursor:default }
+    button.current { background:#14644f; border-color:#218c6d }
+    .muted { color:var(--muted) }
+    .list { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin:16px 0 }
+    .card { display:flex; flex-direction:column; gap:10px; min-width:0; border:1px solid var(--line); border-radius:12px; background:var(--panel); padding:14px }
+    .card img { width:100%; height:230px; object-fit:contain; background:#0e131a; border-radius:8px; cursor:zoom-in }
+    .card h2 { font-size:14px; overflow-wrap:anywhere; margin:0 0 4px }
+    .row { margin:6px 0; display:flex; flex-wrap:wrap; gap:6px; align-items:center }
+    .lbl { color:var(--muted); font-size:12px; min-width:70px; text-transform:uppercase; letter-spacing:.04em }
+    .pill { border:1px solid var(--line); border-radius:20px; padding:1px 10px; font-size:13px }
+    .pill.color { border-color:#5aa7ff; } .pill.estilo { border-color:#c58cff } .pill.temporada { border-color:#ffcc76 }
+    .desc { margin:8px 0 0; color:#cfd9e4 }
+    .pager { display:flex; flex-wrap:wrap; gap:6px; align-items:center; justify-content:center }
+    dialog { border:1px solid #405064; border-radius:12px; background:var(--panel); padding:10px; max-width:94vw }
+    dialog img { max-width:90vw; max-height:85vh; display:block }
+    dialog::backdrop { background:#000b }
+    @media(max-width:1000px) { .list { grid-template-columns:repeat(2,minmax(0,1fr)) } }
+    @media(max-width:640px) { .list { grid-template-columns:1fr } }
+  </style>
+</head>
+<body>
+<header>
+  <div><h1>Galería de prendas</h1><div class="muted" id="summary">Cargando…</div></div>
+  <div class="bar">
+    <select id="category" aria-label="Categoría"><option value="">Todas las categorías</option></select>
+    <select id="provider" aria-label="Proveedor">
+      <option value="">Todos los proveedores</option><option value="deepseek">DeepSeek</option><option value="nim">NVIDIA NIM</option>
+    </select>
+    <a href="/">← Monitor</a>
+  </div>
+</header>
+<main>
+  <div class="pager" id="pagerTop"></div>
+  <div class="list" id="list"></div>
+  <div class="pager" id="pagerBottom"></div>
+</main>
+<dialog id="zoom"><img id="zoomImg" alt="Prenda ampliada"></dialog>
+<script>
+  const state = { page: 1, pages: 1 };
+  const $ = id => document.getElementById(id);
+  const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; };
+  const LABELS = { color: "Colores", estilo: "Estilos", temporada: "Temporadas" };
+
+  function card(item) {
+    const c = el("article", "card");
+    const img = el("img"); img.src = item.imagen_url; img.loading = "lazy"; img.alt = item.codigo;
+    img.addEventListener("click", () => { $("zoomImg").src = item.imagen_url; $("zoom").showModal(); });
+    c.append(img);
+    const body = el("div");
+    body.append(el("h2", "", `${item.categoria} · ${item.codigo}`));
+    body.append(el("div", "muted", `${item.split} · ${item.estado} · ${item.proveedor || "sin análisis"} ${item.modelo ? "(" + item.modelo + ")" : ""}`));
+    for (const code of Object.keys(LABELS)) {
+      const values = item.propiedades[code] || [];
+      const row = el("div", "row"); row.append(el("span", "lbl", LABELS[code]));
+      if (values.length) values.forEach(v => row.append(el("span", "pill " + code, v)));
+      else row.append(el("span", "muted", "—"));
+      body.append(row);
+    }
+    if (item.descripcion) body.append(el("p", "desc", item.descripcion));
+    c.append(body);
+    return c;
+  }
+
+  function pager(target) {
+    target.replaceChildren();
+    const add = (label, page, extra) => {
+      const b = el("button", page === state.page && !extra ? "current" : "", label);
+      b.disabled = page < 1 || page > state.pages || (page === state.page && extra);
+      b.addEventListener("click", () => load(page)); target.append(b);
+    };
+    add("« Primera", 1, true); add("‹ Anterior", state.page - 1, true);
+    const from = Math.max(1, state.page - 3), to = Math.min(state.pages, state.page + 3);
+    for (let p = from; p <= to; p++) add(String(p), p);
+    add("Siguiente ›", state.page + 1, true); add("Última »", state.pages, true);
+    const input = el("input"); input.type = "number"; input.min = 1; input.max = state.pages; input.placeholder = "Ir a…";
+    input.addEventListener("keydown", e => { if (e.key === "Enter" && input.value) load(parseInt(input.value, 10)); });
+    target.append(input);
+  }
+
+  async function load(page) {
+    const q = new URLSearchParams({ page: page || 1, category: $("category").value, provider: $("provider").value });
+    const response = await fetch("/api/gallery?" + q);
+    const data = await response.json();
+    if (!response.ok) { $("summary").textContent = data.error || "Error"; return; }
+    state.page = data.page; state.pages = data.pages;
+    if ($("category").options.length === 1) data.categories.forEach(c => $("category").append(new Option(c, c)));
+    $("summary").textContent = `${data.total.toLocaleString("es")} prendas · página ${data.page} de ${data.pages.toLocaleString("es")} · ${data.page_size} por página`;
+    $("list").replaceChildren(...data.items.map(card));
+    if (!data.items.length) $("list").append(el("p", "muted", "No hay prendas para este filtro."));
+    pager($("pagerTop")); pager($("pagerBottom"));
+    history.replaceState(null, "", `?page=${data.page}`);
+    window.scrollTo({ top: 0 });
+  }
+  document.addEventListener("keydown", e => {
+    if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+    if (e.key === "ArrowRight") load(state.page + 1); if (e.key === "ArrowLeft") load(state.page - 1);
+  });
+  $("zoom").addEventListener("click", () => $("zoom").close());
+  $("category").addEventListener("change", () => load(1));
+  $("provider").addEventListener("change", () => load(1));
+  load(parseInt(new URLSearchParams(location.search).get("page") || "1", 10));
+</script>
+</body>
+</html>

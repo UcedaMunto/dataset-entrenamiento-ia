@@ -8,9 +8,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
 WORKDIR /app
 
 COPY requirements.txt /app/requirements.txt
-RUN python -m pip install --no-cache-dir --no-index -r /app/requirements.txt
+RUN python -m pip install --no-cache-dir -r /app/requirements.txt
 
-COPY entrypoint.sh train.py predict.py /app/
+COPY entrypoint.sh train.py predict.py monitor.py /app/
 COPY configs/ /app/configs/
 RUN chmod +x /app/entrypoint.sh
 

@@ -196,6 +196,31 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("NVIDIA_NIM_API_KEY=do-not-return-this-secret", content)
         self.assertEqual(self.env.stat().st_mode & 0o777, 0o600)
 
+    def test_gallery_paginates_by_15_and_merges_stored_and_suggested_properties(self):
+        with sqlite3.connect(self.database) as connection:
+            for index in range(1, 33):
+                connection.execute(
+                    "INSERT INTO prenda (codigo, ruta_categoria, split, estado_revision, apta_para_entrenamiento) "
+                    "VALUES (?, 'superior/camisas', 'train', 'pendiente', 0)",
+                    (f"C-{index}",),
+                )
+                connection.execute(
+                    "INSERT INTO descripcion_prenda (id_prenda, texto, atributos_sugeridos, proveedor, modelo) "
+                    "VALUES (?, 'Camisa.', '{\"colores\":[\"azul\"],\"estilos\":[\"casual\"],\"temporadas\":[\"verano\"]}', 'nim', 'm')",
+                    (index,),
+                )
+            connection.execute(
+                "INSERT INTO valor_propiedad_prenda (id_prenda,id_propiedad,valor) "
+                "SELECT 32,id_propiedad,'rojo' FROM catalogo_propiedad WHERE codigo='color'"
+            )
+        first = dashboard.get_gallery(1, None, None)
+        self.assertEqual((first["total"], first["pages"], len(first["items"])), (32, 3, 15))
+        self.assertEqual(first["items"][0]["propiedades"]["color"], ["rojo", "azul"])
+        self.assertEqual(first["items"][1]["propiedades"]["estilo"], ["casual"])
+        self.assertEqual(len(dashboard.get_gallery(3, None, None)["items"]), 2)
+        self.assertEqual(dashboard.get_gallery(99, None, None)["page"], 3)
+        self.assertEqual(dashboard.get_gallery(1, None, "deepseek")["total"], 0)
+
     def test_estimate_requires_time_spread(self):
         with sqlite3.connect(self.database) as connection:
             connection.row_factory = sqlite3.Row
