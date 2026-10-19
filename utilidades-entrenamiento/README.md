@@ -2,6 +2,24 @@
 
 Este directorio contiene el entorno Docker Compose y los scripts para el MVP MobileNetV3-Small. El dataset y sus tablas SQLite permanecen en `../dataset/`; los checkpoints y la caché de pesos preentrenados se escriben en `modelo-ia/`. Los repositorios auxiliares descargados, si fueran necesarios, se pueden colocar en `repositorios/`; no se versionan automáticamente.
 
+## Equipo de referencia actual
+
+Medición del host de entrenamiento, **18 de octubre de 2026**:
+
+| Recurso | Especificación observada |
+|---|---|
+| CPU | Intel Core i7-8750H, 6 núcleos / 12 hilos, 2,20 GHz base y hasta 4,10 GHz reportados |
+| GPU física | NVIDIA GeForce RTX 2060 Mobile (TU106M), identificada por PCI (`10de:1f11`); VRAM no medida |
+| RAM | 15 GiB visibles por Linux (aprox. 16 GB instalados) |
+| Swap | 4 GiB configurados; el uso cambia con la carga del host |
+| Sistema | Ubuntu 24.04.4 LTS, x86_64 |
+| Disco del proyecto | Volumen de 98 GB; 67 GB libres durante la medición |
+| Entorno del modelo | PyTorch 2.5.1+cu124 en Docker; `torch.cuda.is_available()` devuelve `False`, así que esta configuración entrena con CPU pese a que el host sí tiene una RTX 2060 Mobile |
+| Límite del contenedor | Sin límites explícitos de memoria, cantidad de CPU ni cpuset en Docker; compite por los recursos disponibles del host |
+| Dataset válido | 12.379 imágenes train, 1.511 val y 1.529 test en la consulta del 18 de octubre de 2026 |
+
+La GPU física está confirmada por PCI, pero no está disponible para entrenamiento: faltan `/dev/nvidia*` y `/proc/driver/nvidia`, `nvidia-smi` no está instalado y PyTorch dentro del contenedor no detecta CUDA. Hay que instalar/cargar un driver NVIDIA compatible y configurar NVIDIA Container Toolkit antes de afirmar que el entrenamiento usa la RTX. La VRAM todavía no se ha medido. El espacio libre y el uso de RAM/swap son instantáneas y deben volver a medirse antes de trabajos largos.
+
 ## Interfaz de entrenamiento
 
 El servicio `train` entrena en segundo plano y no publica puertos; por eso no aparece una URL en `docker ps`. Para abrir el panel de seguimiento, ejecuta desde este directorio:
@@ -88,6 +106,8 @@ docker compose run --rm train predict \
 ```
 
 El umbral por defecto proviene del checkpoint; se puede ajustar con `--threshold 0.5`.
+
+La evaluación reproducible por propiedad desde terminal y el último resultado están en [`EVALUACION-PROPIEDADES.md`](./EVALUACION-PROPIEDADES.md).
 
 ## API de inferencia en una VM con CPU
 

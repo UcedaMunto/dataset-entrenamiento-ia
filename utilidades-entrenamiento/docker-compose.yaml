@@ -9,6 +9,7 @@ x-training: &training
   volumes:
     - ../dataset:/app/dataset:ro
     - ./modelo-ia:/app/modelo-ia
+    - ./modelos-compartidos:/app/modelos-compartidos:ro
   environment:
     TORCH_HOME: /app/modelo-ia/cache
     PYTHONUNBUFFERED: "1"
