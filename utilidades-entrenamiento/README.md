@@ -107,7 +107,7 @@ docker compose run --rm train predict \
 
 El umbral por defecto proviene del checkpoint; se puede ajustar con `--threshold 0.5`.
 
-La metodología, comando de terminal, resultados actuales y resumen de 20 líneas están en el [informe de evaluación](../EVALUACION-ENTRENAMIENTO.md).
+La metodología, comando de terminal, resultados actuales y limitaciones están en el [informe de evaluación](../EVALUACION-ENTRENAMIENTO.md).
 
 ## API de inferencia en una VM con CPU
 

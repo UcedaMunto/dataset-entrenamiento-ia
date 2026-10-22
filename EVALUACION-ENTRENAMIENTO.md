@@ -1,59 +1,53 @@
-# Evaluación del entrenamiento
+# Evaluación del clasificador (MobileNetV3-Small)
 
-## Método
+## Diseño de la prueba
 
-El evaluador independiente `utilidades-entrenamiento/evaluate_properties.py` carga un checkpoint existente en modo inferencia; no entrena ni modifica los pesos. Usa únicamente prendas aprobadas, aptas y con archivos presentes en el split elegido. Para el resultado final se usa `test`, que no debe emplearse para ajustar el modelo.
+- **Objetivo:** medir qué porcentaje de las propiedades de una prenda (tipo, color y estilo) reconoce el modelo en fotografías que no usó para entrenar.
+- **Muestra:** el conjunto de prueba completo, 1.424 imágenes (una por prenda); 1.418 tienen color y estilo anotados. La partición es fija (carpeta de origen o hash SHA-256) y el test no se usó para elegir checkpoint ni umbral (0,5 fijo). Dataset vigente (22-10-2026): 14.456 imágenes aprobadas, 11.616 train, 1.416 val y 1.424 test.
+- **Instrumento:** `utilidades-entrenamiento/evaluate_properties.py`. Solo inferencia en CPU; no entrena ni modifica pesos. Guarda un JSON con el SHA-256 de la base de datos.
+- **Predicción:** tipo = clase de mayor probabilidad; color y estilo = etiquetas con probabilidad ≥ 0,5.
 
-- **Tipo:** exactitud = tipos correctos / imágenes evaluadas.
-- **Color y estilo:** coincidencia exacta requiere que el conjunto completo de etiquetas coincida. Jaccard parcial calcula, por imagen, intersección / unión entre etiquetas predichas y reales; después promedia los valores. Dos conjuntos vacíos cuentan como coincidencia total.
-- **Promedio global:** media aritmética no ponderada de exactitud de tipo, Jaccard parcial de color y Jaccard parcial de estilo. Cada propiedad pesa un tercio; se informa junto con cada métrica para no ocultar diferencias.
-- El script también calcula precisión, recall y F1 micro y por etiqueta. Etiquetas sin ejemplos anotados tienen soporte cero y no son interpretables.
+## Cálculos
 
-## Reproducir el test
+Con $T$ imágenes, $P_i$ el conjunto predicho y $R_i$ el real:
 
-Desde `utilidades-entrenamiento/`, sobre la última ejecución:
+- **Tipo:** exactitud $=$ tipos correctos $/\,T$.
+- **Color/estilo, exacta:** $\#\{i: P_i=R_i\}\,/\,T$.
+- **Color/estilo, parcial (Jaccard):** $\frac{1}{T}\sum_i \frac{|P_i\cap R_i|}{|P_i\cup R_i|}$ (1 si ambos vacíos). Ejemplo: real {azul}, predicho {azul, blanco} da 0,5.
+- **Promedio macro:** media simple de tipo, Jaccard de color y Jaccard de estilo (cada una pesa un tercio).
+- **Criterio de aceptación (R11):** macro $\ge 70\,\%$.
+
+## Reproducir
+
+Desde `utilidades-entrenamiento/`:
 
 ```bash
 docker compose run --rm --no-deps --entrypoint python train \
   /app/evaluate_properties.py \
-  --checkpoint /app/modelo-ia/runs/20261019-003147/best.pt \
+  --checkpoint /app/modelos-compartidos/mobilenetv3-small-best.pt \
   --split test --device cpu \
-  --output /app/modelo-ia/evaluaciones/evaluacion_propiedades_20261019-003147.json
+  --output /app/modelo-ia/evaluaciones/evaluacion_propiedades_test.json
 ```
 
-## Resultado del último checkpoint
+## Resultados (test, 1.424 imágenes, CPU, 22-10-2026)
 
-Ejecución `20261019-003147`, mejor checkpoint de la época 8. Evaluación CPU sobre 1.424 imágenes test; tipo tiene 1.424 etiquetas y color/estilo 1.418 muestras anotadas. Umbral multi-etiqueta: 0,5.
+| Propiedad | Checkpoint compartido (época 15) | Último entrenamiento `20261022-015119` (época 21) |
+|---|---:|---:|
+| Tipo, exactitud | 1.352 / 1.424 = **94,94 %** | 1.340 / 1.424 = **94,10 %** |
+| Color, exacta | 764 / 1.418 = 53,88 % | 774 / 1.418 = 54,58 % |
+| Color, Jaccard | **68,42 %** | **69,34 %** |
+| Estilo, exacta | 674 / 1.418 = 47,53 % | 676 / 1.418 = 47,67 % |
+| Estilo, Jaccard | **69,21 %** | **69,48 %** |
+| **Promedio macro** | **77,52 %** | **77,64 %** |
 
-| Propiedad | Exacta | Coincidencia parcial | F1 micro |
-|---|---:|---:|---:|
-| Tipo | 1.341 / 1.424 = **94,17 %** | — | — |
-| Color | 755 / 1.418 = **53,24 %** | Jaccard **67,10 %** | 71,68 % |
-| Estilo | 659 / 1.418 = **46,47 %** | Jaccard **68,63 %** | 75,91 % |
+El modelo reportado en el informe es el checkpoint compartido; la diferencia con el último entrenamiento (0,12 puntos) no es significativa. Clases más débiles (checkpoint compartido): suéter (recall 66,7 %), color naranja (18,9 %) y estilo entretiempo (15,0 %). Detalle por clase en `utilidades-entrenamiento/modelo-ia/evaluaciones/`.
 
-**Promedio global:** $(94,17 + 67,10 + 68,63) / 3 = \mathbf{76,63\%}$.
+## Limitaciones críticas
 
-El informe JSON completo conserva métricas por etiqueta y el hash de SQLite. Este test corresponde al dataset después de la purga de duplicados; al cambiar el dataset, debe generarse un nuevo resultado.
+1. **Etiquetas no independientes:** color y estilo los generaron NVIDIA NIM (6,6 %) y DeepSeek (93,4 %); la prueba mide concordancia con anotaciones de IA, no con una referencia humana. El tipo viene de la clase de la fuente pública.
+2. **Desbalance:** blusa 43,8 % y falda 2,4 %; falda (28) y suéter (42) tienen pocos ejemplos de prueba.
+3. **Casi duplicados:** 77 imágenes de test (5,4 %) tienen una casi idéntica en train; al excluirlas el macro baja a 76,96 %.
+4. **Exacta frente a parcial:** con coincidencia exacta, color y estilo quedan por debajo de 70 %; solo el macro con Jaccard supera el criterio.
+5. **Dominio:** fotos de catálogos públicos, no de una persona vistiendo la prenda; esa condición no se midió.
 
-## Estado actual en 20 líneas
-
-1. No hay entrenamiento activo; la última ejecución terminó correctamente.
-2. Última ejecución: `20261019-003147`.
-3. Arquitectura: MobileNetV3-Small multitarea.
-4. Resolución: 224 × 224 píxeles; batch: 64.
-5. Se continuó desde `20261018-192232`, checkpoint de época 10.
-6. La continuación reinició optimizador y scheduler; no fue reanudación exacta.
-7. Estrategia: ajuste fino completo en CPU, con hasta 10 épocas.
-8. Se completaron las 10 épocas; no se activó parada temprana.
-9. Mejor checkpoint de la ejecución: época 8.
-10. Mejor pérdida de validación: 0,5635.
-11. Pérdida de validación en época 10: 0,5648.
-12. Dataset elegible actual: train 11.622, val 1.417 y test 1.424 imágenes.
-13. Test de tipo: 1.341 aciertos de 1.424, exactitud 94,17 %.
-14. Test de color: 1.418 muestras anotadas; coincidencia exacta 53,24 %.
-15. Jaccard parcial de color: 67,10 %; F1 micro: 71,68 %.
-16. Test de estilo: 1.418 muestras anotadas; coincidencia exacta 46,47 %.
-17. Jaccard parcial de estilo: 68,63 %; F1 micro: 75,91 %.
-18. Promedio macro de tipo, color-Jaccard y estilo-Jaccard: **76,63 %**.
-19. Umbral de color/estilo: 0,5; el modelo no genera descripciones libres.
-20. Informe detallado: `utilidades-entrenamiento/modelo-ia/evaluaciones/evaluacion_propiedades_20261019-003147.json`.
+Análisis ampliado y correcciones al informe: [CORRECCIONES-INFORME.md](./CORRECCIONES-INFORME.md).
