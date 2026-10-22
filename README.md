@@ -2,6 +2,8 @@
 
 > **Versión vigente:** 2. La versión anterior se conserva como respaldo descartado en [`README-v1.md`](./README-v1.md).
 
+El resultado actual y la metodología para evaluar tipo, color y estilo están en [EVALUACION-ENTRENAMIENTO.md](./EVALUACION-ENTRENAMIENTO.md).
+
 ## ¿Dónde se ve la interfaz?
 
 Hay dos paneles web, para tareas distintas:
