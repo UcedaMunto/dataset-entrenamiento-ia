@@ -1,12 +1,14 @@
 # Resumen del método de entrenamiento
 
+> **Referencia metodológica con contexto histórico.** Ya existe un modelo entrenado y evaluado. Las cifras iniciales, recomendaciones y descripciones futuras del cuerpo no son un parte de estado vigente. Consulta el [resumen actualizado](<readme resumen.md>) y la [evaluación](EVALUACION-ENTRENAMIENTO.md).
+
 ## 1. Objetivo y estado actual
 
 El proyecto entrena un clasificador visual que, a partir de una o varias fotografías de **una misma prenda**, predice tres grupos de propiedades: **tipo de prenda**, **color** y **estilo**. El alcance son nueve categorías: abrigo, blusa, camisa, chaqueta, falda, pantalón, short, suéter y vestido (camisas y camisetas se unifican en `camisa`). La temporada se anota en el dataset como metadato, pero **no es una salida del modelo** del MVP.
 
-El modelo de producción del MVP es **MobileNetV3-Small**. Las IA generativas (NVIDIA NIM y DeepSeek) solo participan en la **curación del dataset**; no se despliegan ni son un profesor de destilación. El método implementado es **aprendizaje por transferencia supervisado** con etiquetas revisadas por personas. La destilación queda como experimento posterior.
+El modelo de producción del MVP es **MobileNetV3-Small**. Las IA generativas (NVIDIA NIM y DeepSeek) solo participan en la **curación del dataset**; no se despliegan ni son un profesor de destilación. El método implementado es **aprendizaje por transferencia supervisado** con etiquetas asistidas por IA; el estado aprobado no acredita revisión humana individual. La destilación queda como experimento posterior.
 
-Estado: el dataset supera las 5.900 prendas importadas, pero las muestras creadas por el curador quedan `pendiente` y con `apta_para_entrenamiento = 0` hasta que una persona las apruebe. Por eso aún no hay un modelo entrenado ni validado.
+Estado: el dataset supera las 5.900 prendas importadas, pero las muestras creadas por el curador quedan `pendiente` y con `apta_para_entrenamiento = 0` hasta que una persona las apruebe. Ese era el estado inicial; actualmente existe un checkpoint compartido con evaluación registrada.
 
 ## 2. Flujo completo, del dataset al modelo
 
@@ -28,7 +30,7 @@ Estado: el dataset supera las 5.900 prendas importadas, pero las muestras creada
 
 **Anotación con IA.** Cada proveedor corre en su propio lote, con control de detención independiente y hasta **15.000 imágenes nuevas** por lote (no analizadas aún).
 
-- **NVIDIA NIM:** modelo principal `nvidia/nemotron-3.5-super-vl-120b-a12b`. Si falla, cambia automáticamente a `meta/llama-3.2-11b-vision-instruct` y luego a `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`. Un HTTP 500 o 429 se reintenta una vez; un modelo solo se excluye tras 4 fallos seguidos, o de inmediato con HTTP 401, 403 o 404.
+- **NVIDIA NIM:** modelo principal `nvidia/nemotron-3.5-super-vl-120b-a12b`. Si falla, cambia automáticamente a `meta/llama-3.2-11b-vision-instruct` después a `meta/llama-3.2-90b-vision-instruct` y finalmente a `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`. Un HTTP 500 o 429 se reintenta una vez; un modelo solo se excluye tras 4 fallos seguidos, o de inmediato con HTTP 401, 403 o 404.
 - **DeepSeek:** `deepseek-flash`. Si falla, la imagen se reintenta con NIM.
 - **Llamadas por etapas.** Para reducir JSON inválido, NIM resuelve cada imagen en cuatro llamadas cortas (colores, estilos, temporadas y validación) que luego se unen. El parser extrae el primer objeto JSON de la respuesta aunque venga con texto alrededor.
 - **Vocabulario controlado.** Los colores son una lista cerrada. Los estilos y las temporadas pueden ampliarse con valores nuevos devueltos por las IA, que entran al catálogo.

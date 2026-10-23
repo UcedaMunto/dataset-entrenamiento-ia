@@ -2,6 +2,10 @@
 
 Este proyecto inspecciona fuentes locales, conserva su clase de origen, normaliza las categorías al dataset del proyecto y, opcionalmente, pide a uno o más proveedores visuales una descripción y sugerencias de color, estilo y temporada. Los colores están limitados al catálogo; los estilos y temporadas nuevos se incorporan automáticamente a SQLite cuando los responde una API. Es una etapa de preparación de datos; no es el entrenamiento de MobileNet ni, por sí sola, destilación de conocimiento.
 
+[Índice documental](../../docs/INDICE.md) · [Estado verificado](../../docs/VALIDACION.md).
+
+El máximo actual del panel es **15.000 imágenes nuevas por proveedor**; 5.000 es un objetivo de referencia, no el límite técnico.
+
 ## Estado de los datos y fuentes
 
 `datos-crudos/` contiene los repositorios `clothing-dataset-small-master/` y `clothing-dataset-master/`, además de AIG en `AIG-Dataset/`. AIG tiene 13 carpetas de clase, con 10.000 archivos `.jpg` en cada una. Se inspeccionaron los archivos y no se encontró README, LICENSE ni manifiesto adicional en esa carpeta. Fashion-MNIST no está presente. No se descargan repositorios ni datasets automáticamente.
@@ -38,7 +42,7 @@ La configuración/mapeos editables están en [`sources.json`](./sources.json). E
 - Durante el procesamiento, las categorías `camisa` y `camiseta` se normalizan a la clase canónica `camisa`; la etiqueta original de la fuente se conserva para trazabilidad.
 - [`dashboard.py`](./dashboard.py) y [`dashboard.html`](./dashboard.html): panel local para monitorear prendas por tipo y últimas importaciones, iniciar y detener lotes desde el navegador con estado y registro en vivo, y cambiar prompt, vocabularios y proveedor/claves.
 
-Una imagen fuente produce inicialmente una carpeta/prenda en `dataset/`. Se conserva la partición si el path tiene `train`, `validation`/`val` o `test`; si no, se asigna determinísticamente por hash. El registro queda `pendiente` y `apta_para_entrenamiento=0`. Para llamadas remotas, la IA valida si la imagen corresponde a la clase fuente y puede descartarla antes de copiarla. Las imágenes aceptadas se importan con anotación pendiente; color/estilo sugeridos se guardan en `descripcion_prenda.atributos_sugeridos`, no como etiquetas supervisadas confirmadas. Una persona debe revisar y aprobarlas antes de entrenar.
+Una imagen fuente produce inicialmente una carpeta/prenda en `dataset/`. Se conserva la partición si el path tiene `train`, `validation`/`val` o `test`; si no, se asigna determinísticamente por hash. El registro queda `pendiente` y `apta_para_entrenamiento=0`. Para llamadas remotas, la IA valida si la imagen corresponde a la clase fuente y puede descartarla antes de copiarla. Las imágenes aceptadas se importan con anotación pendiente; color/estilo sugeridos se guardan en `descripcion_prenda.atributos_sugeridos` y `valor_propiedad_prenda`, pero la prenda sigue pendiente y no es apta para entrenamiento. Una persona debe revisar y aprobarlas antes de entrenar.
 
 Cada respuesta válida se guarda en `analisis_imagen`, tanto si acepta como si descarta la muestra. Al repetir la ejecución con la misma imagen, clase canónica, proveedor, modelo y versión del prompt, se reutiliza esa decisión y se evita otra llamada. Un análisis aceptado también queda protegido contra duplicación por SHA-256 en `prenda_imagen`. Si cambia proveedor/modelo o se incrementa la versión del prompt, la huella cambia intencionalmente.
 

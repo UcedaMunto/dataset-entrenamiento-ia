@@ -2,7 +2,9 @@
 
 Las imágenes se organizan por zona del cuerpo y tipo de prenda. Las etiquetas, propiedades, estado de revisión y rutas de imagen se registran en SQLite; no se usa un JSON o CSV por prenda como fuente de verdad.
 
-En una lectura de SQLite del 17 de octubre de 2026, todas las prendas existentes estaban pendientes de revisión y ninguna estaba habilitada para entrenamiento; la importación puede continuar, así que consulta SQLite para los conteos actuales. La respuesta de una API o la importación de una imagen no equivale a una etiqueta aprobada. Consulta el estado y los criterios de habilitación en la [guía general del dataset](../documentacion_dataset/README.md#factibilidad-y-alcance-del-mvp), y el proceso de sugerencias en el [pipeline de curación](../utilidades-entrenamiento/modelo-general-destilacion/README.md).
+**Estado comprobado al 23-10-2026:** 14.456 prendas aprobadas y aptas; véase [validación](../docs/VALIDACION.md).
+
+**Antecedente histórico:** en una lectura de SQLite del 17 de octubre de 2026, todas las prendas existentes estaban pendientes de revisión y ninguna estaba habilitada para entrenamiento; la importación puede continuar, así que consulta SQLite para los conteos actuales. La respuesta de una API o la importación de una imagen no equivale a una etiqueta aprobada. Consulta el estado y los criterios de habilitación en la [guía general del dataset](../documentacion_dataset/README.md#factibilidad-y-alcance-del-mvp), y el proceso de sugerencias en el [pipeline de curación](../utilidades-entrenamiento/modelo-general-destilacion/README.md).
 
 Consulta la [documentación del dataset](../documentacion_dataset/README.md) para:
 

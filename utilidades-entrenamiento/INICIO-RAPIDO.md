@@ -1,5 +1,9 @@
 # Iniciar el entrenamiento
 
+[Índice documental](../docs/INDICE.md) · [Panel del dataset](modelo-general-destilacion/README.md) · [Resumen del proyecto](<../readme resumen.md>).
+
+Esta guía inicia entrenamiento por terminal. Para gestionarlo desde el panel, construye la imagen y levanta `monitor`, y pulsa iniciar allí. El monitor solo puede detener los entrenamientos que él mismo lanza; evita iniciar otro por terminal al mismo tiempo.
+
 Todo corre en contenedores; solo se necesita Docker (y driver NVIDIA + NVIDIA Container Toolkit para GPU).
 
 ```bash

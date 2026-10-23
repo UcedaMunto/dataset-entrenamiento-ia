@@ -1,5 +1,7 @@
 # Evaluación del clasificador (MobileNetV3-Small)
 
+La revisión del 23-10-2026 contrastó estas cifras con los JSON locales existentes y el hash del checkpoint; no ejecutó una nueva evaluación completa. Véase [validación](docs/VALIDACION.md). La columna de entrenamiento del 22 de octubre es una comparación fechada, no necesariamente la última ejecución disponible.
+
 ## Diseño de la prueba
 
 - **Objetivo:** medir qué porcentaje de las propiedades de una prenda (tipo, color y estilo) reconoce el modelo en fotografías que no usó para entrenar.
@@ -40,7 +42,7 @@ docker compose run --rm --no-deps --entrypoint python train \
 | Estilo, Jaccard | **69,21 %** | **69,48 %** |
 | **Promedio macro** | **77,52 %** | **77,64 %** |
 
-El modelo reportado en el informe es el checkpoint compartido; la diferencia con el último entrenamiento (0,12 puntos) no es significativa. Clases más débiles (checkpoint compartido): suéter (recall 66,7 %), color naranja (18,9 %) y estilo entretiempo (15,0 %). Detalle por clase en `utilidades-entrenamiento/modelo-ia/evaluaciones/`.
+El modelo reportado en el informe es el checkpoint compartido; la diferencia con ese entrenamiento es de 0,12 puntos porcentuales; no se ha realizado una prueba estadística para establecer su significancia. Clases más débiles (checkpoint compartido): suéter (recall 66,7 %), color naranja (18,9 %) y estilo entretiempo (15,0 %). Detalle por clase en `utilidades-entrenamiento/modelo-ia/evaluaciones/`.
 
 ## Limitaciones críticas
 

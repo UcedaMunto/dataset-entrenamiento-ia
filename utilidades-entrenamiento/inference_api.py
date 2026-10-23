@@ -19,7 +19,8 @@ from train import MultiTaskMobileNet
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 MAX_IMAGE_PIXELS = 25_000_000
 ALLOWED_FORMATS = {"JPEG", "PNG", "WEBP"}
-CHECKPOINT_PATH = Path(os.environ.get("MODEL_CHECKPOINT", "/models/best.pt"))
+DEFAULT_CHECKPOINT = Path(__file__).resolve().parent / "modelos-compartidos" / "mobilenetv3-small-best.pt"
+CHECKPOINT_PATH = Path(os.environ.get("MODEL_CHECKPOINT", str(DEFAULT_CHECKPOINT)))
 INFERENCE_LOCK = threading.Semaphore(2)
 model = None
 checkpoint = None
@@ -63,8 +64,8 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(
     title="API de reconocimiento de prendas",
-    version="1.0.0",
-    description="Inferencia CPU con un checkpoint MobileNetV3-Small ya entrenado.",
+    version="2.0.0",
+    description="Recibe una imagen de prenda y devuelve su descripción mediante MobileNetV3-Small en CPU.",
     lifespan=lifespan,
 )
 app.add_middleware(
@@ -79,7 +80,7 @@ app.add_middleware(
 @app.middleware("http")
 async def reject_oversized_requests(request, call_next):
     content_length = request.headers.get("content-length")
-    if content_length and int(content_length) > (2 * MAX_IMAGE_BYTES + 1_000_000):
+    if content_length and int(content_length) > (MAX_IMAGE_BYTES + 1_000_000):
         return JSONResponse(status_code=413, content={"detail": "La solicitud supera el tamaño permitido."})
     return await call_next(request)
 
@@ -99,7 +100,7 @@ def decode_image(upload: UploadFile) -> Image.Image:
             image.load()
             return image.convert("RGB")
     except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as error:
-        raise HTTPException(status_code=422, detail="No se pudo decodificar una de las imágenes.") from error
+        raise HTTPException(status_code=422, detail="No se pudo decodificar la imagen de la prenda.") from error
 
 
 def ranked_labels(probabilities: torch.Tensor, labels: list[str], threshold: float, limit: int = 5) -> list[dict]:
@@ -135,26 +136,17 @@ def describe_predictions(type_probs: torch.Tensor, color_probs: torch.Tensor,
     }
 
 
-def combine_image_predictions(outputs: dict, saved_checkpoint: dict) -> dict:
-    classes = saved_checkpoint["classes"]
+def describe_image_prediction(outputs: dict, saved_checkpoint: dict) -> dict:
     threshold = float(saved_checkpoint["multilabel_threshold"])
-    type_probs = outputs["type"].softmax(dim=1)
-    color_probs = outputs["color"].sigmoid()
-    style_probs = outputs["style"].sigmoid()
-    per_image = {
-        "prenda": describe_predictions(type_probs[0], color_probs[0], style_probs[0], classes, threshold),
-        "persona": describe_predictions(type_probs[1], color_probs[1], style_probs[1], classes, threshold),
-    }
-    combined = describe_predictions(
-        type_probs.mean(dim=0), color_probs.mean(dim=0), style_probs.mean(dim=0), classes, threshold
+    result = describe_predictions(
+        outputs["type"].softmax(dim=1)[0],
+        outputs["color"].sigmoid()[0],
+        outputs["style"].sigmoid()[0],
+        saved_checkpoint["classes"],
+        threshold,
     )
-    return {
-        "descripcion_mas_probable": combined["descripcion_mas_probable"],
-        "prediccion_combinada": combined,
-        "predicciones_por_imagen": per_image,
-        "metodo_combinacion": "media_aritmetica_de_probabilidades",
-        "umbral_multietiqueta": threshold,
-    }
+    result["umbral_multietiqueta"] = threshold
+    return result
 
 
 @app.get("/health")
@@ -163,24 +155,23 @@ def health():
 
 
 @app.post("/v1/predict")
-def predict_pair(garment_image: UploadFile = File(...), person_image: UploadFile = File(...)):
+def predict_garment(garment_image: UploadFile = File(...)):
     if model is None or checkpoint is None or transform is None:
         raise HTTPException(status_code=503, detail="El modelo todavía no está disponible.")
     garment = decode_image(garment_image)
-    person = decode_image(person_image)
     preprocessing_started = time.perf_counter()
-    tensors = torch.stack([transform(garment), transform(person)])
+    tensors = transform(garment).unsqueeze(0)
     preprocessing_ms = (time.perf_counter() - preprocessing_started) * 1000
     inference_started = time.perf_counter()
     with INFERENCE_LOCK, torch.inference_mode():
         outputs = model(tensors)
     inference_ms = (time.perf_counter() - inference_started) * 1000
-    result = combine_image_predictions(outputs, checkpoint)
+    result = describe_image_prediction(outputs, checkpoint)
     result.update({
         "device": "cpu",
         "latencia_ms": {
-            "preprocesamiento_dos_imagenes": round(preprocessing_ms, 2),
-            "inferencia_dos_imagenes": round(inference_ms, 2),
+            "preprocesamiento_imagen": round(preprocessing_ms, 2),
+            "inferencia_imagen": round(inference_ms, 2),
             "total_servidor": round(preprocessing_ms + inference_ms, 2),
         },
     })

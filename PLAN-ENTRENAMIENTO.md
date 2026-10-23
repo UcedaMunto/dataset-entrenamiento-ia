@@ -1,5 +1,7 @@
 # Plan de entrenamiento (MobileNetV3-Small, V2)
 
+> **Plan histórico.** Las mediciones y problemas descritos corresponden a la planificación inicial; no representan el estado actual. Consulta el [README vigente](README.md) y la [validación del 23-10-2026](docs/VALIDACION.md).
+
 Documento de planificación. No ejecuta nada. Basado en `README.md`, `RESUMEN-METODO-ENTRENAMIENTO.md`, `utilidades-entrenamiento/README.md`, `documentacion_dataset/README.md` y el estado real de este equipo (`osanode-node4`).
 
 ## 1. Hardware detectado

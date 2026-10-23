@@ -1,5 +1,7 @@
 # Correcciones del informe (observaciones 4, 5 y 6)
 
+> **Informe analítico fechado al 22-10-2026.** Conserva propuestas y mediciones históricas; la comprobación posterior está en [validación](docs/VALIDACION.md).
+
 Todas las cifras de este documento se midieron el 22-10-2026 con consultas de solo lectura sobre `dataset/metadata.sqlite`, el registro `registro_entrenamiento.sqlite` y el checkpoint compartido (`mobilenetv3-small-best.pt`, época 15, ejecución `20261018-020637`). La evaluación se repite con [EVALUACION-ENTRENAMIENTO.md](./EVALUACION-ENTRENAMIENTO.md). Lo que no se pudo medir desde este repositorio está marcado como **pendiente**.
 
 ## Datos vigentes (22-10-2026, después de la depuración de duplicados)

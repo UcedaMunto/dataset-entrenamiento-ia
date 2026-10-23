@@ -1,5 +1,7 @@
 # Utilidades de entrenamiento
 
+[Índice documental](../docs/INDICE.md) · [Validación vigente](../docs/VALIDACION.md).
+
 Este directorio contiene el entorno Docker Compose y los scripts para el MVP MobileNetV3-Small. El dataset y sus tablas SQLite permanecen en `../dataset/`; los checkpoints y la caché de pesos preentrenados se escriben en `modelo-ia/`. Los repositorios auxiliares descargados, si fueran necesarios, se pueden colocar en `repositorios/`; no se versionan automáticamente.
 
 ## Equipo de referencia actual
@@ -22,7 +24,7 @@ La GPU física está confirmada por PCI, pero no está disponible para entrenami
 
 ## Interfaz de entrenamiento
 
-El servicio `train` entrena en segundo plano y no publica puertos; por eso no aparece una URL en `docker ps`. Para abrir el panel de seguimiento, ejecuta desde este directorio:
+El servicio `train` ejecuta entrenamiento por terminal y no publica puertos; por eso no aparece una URL en `docker ps`. Para abrir el panel de seguimiento, ejecuta desde este directorio:
 
 ```bash
 docker compose build
@@ -57,7 +59,7 @@ docker compose run --rm train status
 
 `status` indica versión de PyTorch y si el contenedor detecta CUDA. El servicio predeterminado `train` no solicita GPU y es adecuado para CPU.
 
-La imagen de entrenamiento instala sus dependencias sin red; los pesos preentrenados sí se descargan al iniciar el primer entrenamiento. Si Docker avisa que el reenvío IPv4 está deshabilitado, el estado puede funcionar pero la descarga de pesos fallará hasta corregir la conectividad del daemon.
+La imagen de entrenamiento instala sus dependencias con pip durante la construcción y requiere acceso al repositorio de paquetes; los pesos preentrenados sí se descargan al iniciar el primer entrenamiento. Si Docker avisa que el reenvío IPv4 está deshabilitado, el estado puede funcionar pero la descarga de pesos fallará hasta corregir la conectividad del daemon.
 
 ## Entrenar
 
@@ -137,24 +139,22 @@ curl http://127.0.0.1:8081/health
 
 Respuesta esperada: `{"status":"ok","device":"cpu"}`. La especificación interactiva OpenAPI está en `http://127.0.0.1:8081/docs`.
 
-### Contrato de dos imágenes
+### Contrato de una imagen
 
-`POST /v1/predict` recibe `multipart/form-data` con exactamente estos dos campos de archivo requeridos:
+`POST /v1/predict` recibe `multipart/form-data` con un único campo de archivo requerido: `garment_image`, la foto de la prenda. No requiere foto de persona.
 
-- `garment_image`: foto de la prenda aislada o de producto.
-- `person_image`: foto de una persona usando esa misma prenda.
-
-Admite JPEG, PNG y WebP; cada archivo puede pesar hasta 10 MiB y tener como máximo 25 megapíxeles. Ejemplo desde el host:
+Admite JPEG, PNG y WebP; máximo 10 MiB y 25 megapíxeles por imagen. Ejemplo:
 
 ```bash
 curl --fail-with-body -X POST http://127.0.0.1:8081/v1/predict \
-  -F 'garment_image=@/ruta/a/prenda.jpg' \
-  -F 'person_image=@/ruta/a/persona-con-prenda.jpg'
+  -F 'garment_image=@/ruta/a/prenda.jpg'
 ```
 
-La respuesta incluye `descripcion_mas_probable`, probabilidades combinadas, predicciones separadas bajo `predicciones_por_imagen.prenda` y `.persona`, el método de combinación y latencias. Para tipo se promedian las distribuciones softmax de ambas imágenes; para color y estilo se promedian las probabilidades sigmoid. Color/estilo devuelven los cinco candidatos principales y marcan `supera_umbral` usando el umbral almacenado en el checkpoint.
+Devuelve `descripcion_mas_probable`, `tipo_prenda`, `colores`, `estilos`, `umbral_multietiqueta`, `device` y `latencia_ms`. Tipo utiliza softmax; color y estilo utilizan sigmoid. Se devuelven los cinco candidatos principales por propiedad multietiqueta con su indicador `supera_umbral`. La descripción es una plantilla de etiquetas, sin generar material, talla ni atributos abiertos.
 
-La descripción es una plantilla construida con las clases del modelo (tipo, colores y estilos); **no** la redacta un modelo de lenguaje ni incluye atributos abiertos como material, estampado o ajuste. La API tampoco verifica que ambas fotos muestren la misma prenda. El modelo fue entrenado para clasificar fotos de prendas y la imagen de una persona puede pertenecer a otro dominio visual; por eso se devuelven las dos predicciones individuales para detectar desacuerdos en lugar de ocultarlos en el promedio.
+**Cambio de contrato (versión de aplicación 2.0.0):** se mantiene `/v1/predict`, pero se eliminan la segunda imagen y los campos de combinación. Los clientes deben enviar solo `garment_image` y leer las predicciones directamente en el objeto raíz. Reiniciar el proceso con el código actualizado para aplicar el cambio.
+
+Para instalar el modelo y esta API directamente con Python, seguir la [guía nativa](../docs/INSTALACION-NATIVA.md) o el [manual Word en APA 7](../docs/Instalacion_nativa_API_prendas_APA7.docx). No se necesita dataset ni acceso a proveedores de anotación.
 
 ### Red y seguridad
 
