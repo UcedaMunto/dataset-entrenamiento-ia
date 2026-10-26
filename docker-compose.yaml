@@ -1,0 +1,90 @@
+# Unifica en un solo Compose las interfaces del proyecto:
+#   dashboard     -> panel de dataset/curación (http://127.0.0.1:8787/).
+#                    Consume NVIDIA NIM y DeepSeek para describir/anotar prendas.
+#   monitor       -> panel de entrenamiento (http://127.0.0.1:8090/).
+#                    Inicia/detiene entrenamientos y muestra métricas.
+#   inference-api -> API CPU independiente (http://127.0.0.1:8081/docs).
+#                    Sirve la IA ya entrenada y genera descripciones.
+#
+# El servicio `curator` (perfil "tools") conserva los comandos CLI de curación
+# (audit, ingest, find-duplicates, sync-properties, approve-generated...).
+name: modelo-reconocimiento-prendas
+
+services:
+  dashboard:
+    build:
+      context: ./utilidades-entrenamiento/modelo-general-destilacion
+      dockerfile: Dockerfile
+      network: host
+    network_mode: host
+    init: true
+    user: "${TRAINING_UID:-1000}:${TRAINING_GID:-1000}"
+    entrypoint: ["python", "/app/dashboard.py"]
+    environment:
+      DATASET_ROOT: /app/dataset
+      DASHBOARD_HOST: 127.0.0.1
+      DASHBOARD_PORT: "8787"
+      NVIDIA_NIM_FALLBACK_MODELS: ${NVIDIA_NIM_FALLBACK_MODELS:-meta/llama-3.2-11b-vision-instruct,meta/llama-3.2-90b-vision-instruct,nvidia/nemotron-3-nano-omni-30b-a3b-reasoning}
+    volumes:
+      - ./utilidades-entrenamiento/modelo-general-destilacion/datos-crudos:/app/datos-crudos:ro
+      - ./dataset:/app/dataset
+      - ./documentacion_dataset/schema.sql:/app/schema.sql:ro
+      - ./utilidades-entrenamiento/modelo-general-destilacion/.env:/app/.env
+
+  inference-api:
+    image: modelo-reconocimiento-inferencia:cpu
+    build:
+      context: ./utilidades-entrenamiento
+      dockerfile: Dockerfile
+    init: true
+    user: "${TRAINING_UID:-1000}:${TRAINING_GID:-1000}"
+    shm_size: 1g
+    entrypoint: ["python", "/app/inference_api.py"]
+    environment:
+      MODEL_CHECKPOINT: /models/best.pt
+      API_CPU_THREADS: "${API_CPU_THREADS:-4}"
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - "${MODEL_CHECKPOINT:-./utilidades-entrenamiento/modelos-compartidos/mobilenetv3-small-best.pt}:/models/best.pt:ro"
+    ports:
+      - "127.0.0.1:8081:8080"
+    restart: unless-stopped
+
+  monitor:
+    image: modelo-reconocimiento-entrenamiento:local
+    build:
+      context: ./utilidades-entrenamiento
+      dockerfile: Dockerfile
+    init: true
+    user: "${TRAINING_UID:-1000}:${TRAINING_GID:-1000}"
+    shm_size: 2g
+    entrypoint: ["python", "/app/monitor.py"]
+    environment:
+      TORCH_HOME: /app/modelo-ia/cache
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ./dataset:/app/dataset:ro
+      - ./utilidades-entrenamiento/modelo-ia:/app/modelo-ia
+    ports:
+      - "127.0.0.1:8090:8090"
+
+  curator:
+    build:
+      context: ./utilidades-entrenamiento/modelo-general-destilacion
+      dockerfile: Dockerfile
+      network: host
+    network_mode: host
+    init: true
+    user: "${TRAINING_UID:-1000}:${TRAINING_GID:-1000}"
+    profiles: ["tools"]
+    env_file:
+      - path: ./utilidades-entrenamiento/modelo-general-destilacion/.env
+        required: false
+    environment:
+      DATASET_ROOT: /app/dataset
+      NVIDIA_NIM_FALLBACK_MODELS: ${NVIDIA_NIM_FALLBACK_MODELS:-meta/llama-3.2-11b-vision-instruct,meta/llama-3.2-90b-vision-instruct,nvidia/nemotron-3-nano-omni-30b-a3b-reasoning}
+    volumes:
+      - ./utilidades-entrenamiento/modelo-general-destilacion/datos-crudos:/app/datos-crudos:ro
+      - ./dataset:/app/dataset
+      - ./documentacion_dataset/schema.sql:/app/schema.sql:ro
+    command: ["audit", "--source", "all"]
