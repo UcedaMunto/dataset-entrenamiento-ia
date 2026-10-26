@@ -8,7 +8,7 @@ Sistema Docker para construir un dataset de prendas, entrenar MobileNetV3-Small 
 - [Referencia de endpoints](docs/API.md).
 - [Instalación sin Docker](docs/INSTALACION-NATIVA.md) · [Manual DOCX APA 7](docs/Instalacion_nativa_API_prendas_APA7.docx).
 
-## Las dos interfaces
+## Las tres interfaces
 
 | Interfaz | Dirección local | Función | Implementación |
 |---|---|---|---|
@@ -20,23 +20,29 @@ Las rutas del código de esta tabla son relativas a `utilidades-entrenamiento/`.
 
 ## Arranque
 
-Desde la raíz del proyecto, construir la imagen y levantar el monitor CPU:
+Las tres interfaces (panel de dataset, panel de entrenamiento y API CPU) se levantan con el Compose unificado de la raíz. Prepara una sola vez la configuración del panel de dataset si aún no existe:
+
+```bash
+[ -f utilidades-entrenamiento/modelo-general-destilacion/.env ] || cp utilidades-entrenamiento/modelo-general-destilacion/.env.example utilidades-entrenamiento/modelo-general-destilacion/.env
+chmod 600 utilidades-entrenamiento/modelo-general-destilacion/.env
+```
+
+Después, desde la raíz del proyecto:
+
+```bash
+docker compose up -d --build
+```
+
+Esto levanta las tres interfaces: panel de dataset en `http://127.0.0.1:8787/`, panel de entrenamiento en `http://127.0.0.1:8090/` y API CPU en `http://127.0.0.1:8081/docs`. Para detenerlas: `docker compose down`. El checkpoint de la API se puede cambiar definiendo `MODEL_CHECKPOINT` (ruta absoluta) antes de levantar.
+
+El entrenamiento por terminal se mantiene en el Compose de entrenamiento:
 
 ```bash
 docker compose -f utilidades-entrenamiento/docker-compose.yaml build train
-docker compose -f utilidades-entrenamiento/docker-compose.yaml --profile monitor up -d monitor
+docker compose -f utilidades-entrenamiento/docker-compose.yaml run --rm train
 ```
 
-Para el panel de dataset, preparar una sola vez su archivo local de configuración si aún no existe y levantarlo:
-
-```bash
-cd utilidades-entrenamiento/modelo-general-destilacion
-[ -f .env ] || cp .env.example .env
-chmod 600 .env
-docker compose -f compose.yml up -d --build dashboard
-```
-
-Las claves se configuran localmente; no deben versionarse. El panel de dataset usa red del host y escucha en `127.0.0.1:8787`; el monitor publica `127.0.0.1:8090`. En un servidor remoto se accede mediante túnel SSH. Para GPU usa los perfiles indicados en la [guía de entrenamiento](utilidades-entrenamiento/README.md); la reserva GPU requiere driver NVIDIA y Container Toolkit operativos.
+Las claves se configuran localmente; no deben versionarse. El panel de dataset usa red del host y escucha en `127.0.0.1:8787`; el monitor publica `127.0.0.1:8090` y la API CPU publica `127.0.0.1:8081`. En un servidor remoto se accede mediante túnel SSH. Para GPU usa los perfiles indicados en la [guía de entrenamiento](utilidades-entrenamiento/README.md); la reserva GPU requiere driver NVIDIA y Container Toolkit operativos.
 
 ## Flujo y estado comprobado
 

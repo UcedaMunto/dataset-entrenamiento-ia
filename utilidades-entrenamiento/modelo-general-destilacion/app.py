@@ -18,7 +18,7 @@ import unicodedata
 from pathlib import Path
 
 import requests
-from PIL import Image
+from PIL import Image, ImageChops, ImageOps, ImageStat
 
 
 ROOT = Path(__file__).resolve().parent
@@ -26,6 +26,12 @@ SOURCE_CONFIG = ROOT / "sources.json"
 IMAGE_EXTENSIONS = {".avif", ".bmp", ".gif", ".jpeg", ".jpg", ".png", ".webp"}
 REMOTE_IMAGE_EXTENSIONS = {".gif", ".jpeg", ".jpg", ".png", ".webp"}
 MAX_IMAGE_BYTES = 200_000
+RECENT_IMAGE_WINDOW = 10
+RECENT_IMAGE_SIZE = (32, 32)
+RECENT_IMAGE_HASH_DISTANCE = 2
+RECENT_IMAGE_MEAN_DIFFERENCE = 8
+RECENT_IMAGE_MAX_DIFFERENCE = 32
+RECENT_IMAGE_HISTORY_PREFIX = "recent_sent_images_v1:"
 NIM_MIN_REQUEST_INTERVAL_SECONDS = 3
 NIM_TIMEOUT_RETRY_MIN_SECONDS = 5
 NIM_TIMEOUT_RETRY_MAX_SECONDS = 15
@@ -1453,6 +1459,77 @@ def filter_duplicate_plans(
     )
 
 
+def recent_image_signature(path: Path, digest: str, label: str) -> dict:
+    """Miniatura local para comparar; no modifica los bytes enviados al proveedor."""
+    with Image.open(path) as image:
+        image = ImageOps.exif_transpose(image).convert("RGB")
+        width, height = image.size
+        thumbnail = image.resize(RECENT_IMAGE_SIZE, Image.Resampling.LANCZOS)
+        pixels = list(image.convert("L").resize((9, 8), Image.Resampling.LANCZOS).getdata())
+    value = 0
+    for row in range(8):
+        for col in range(8):
+            value = (value << 1) | (pixels[row * 9 + col] > pixels[row * 9 + col + 1])
+    return {
+        "digest": digest,
+        "label": label,
+        "width": width,
+        "height": height,
+        "dhash": f"{value:016x}",
+        "rgb": base64.b64encode(thumbnail.tobytes()).decode("ascii"),
+    }
+
+
+def recent_images_are_similar(first: dict, second: dict) -> bool:
+    if first["digest"] == second["digest"]:
+        return True
+    first_ratio = first["width"] / first["height"]
+    second_ratio = second["width"] / second["height"]
+    if max(first_ratio, second_ratio) / min(first_ratio, second_ratio) > 1.03:
+        return False
+    if (int(first["dhash"], 16) ^ int(second["dhash"], 16)).bit_count() > RECENT_IMAGE_HASH_DISTANCE:
+        return False
+    thumbnails = [
+        Image.frombytes("RGB", RECENT_IMAGE_SIZE, base64.b64decode(item["rgb"], validate=True))
+        for item in (first, second)
+    ]
+    difference = ImageChops.difference(*thumbnails)
+    return (
+        max(ImageStat.Stat(difference).mean) <= RECENT_IMAGE_MEAN_DIFFERENCE
+        and max(high for _, high in difference.getextrema()) <= RECENT_IMAGE_MAX_DIFFERENCE
+    )
+
+
+def reserve_recent_image(connection: sqlite3.Connection, provider: str, signature: dict) -> str | None:
+    """Compara y reserva un envío inicial de forma atómica, sin bloquear durante HTTP.
+
+    El historial es independiente por proveedor del lote. Reintentos/etapas/fallbacks
+    de la misma prenda no añaden entradas. Solo se retienen los últimos diez intentos.
+    """
+    key = RECENT_IMAGE_HISTORY_PREFIX + provider
+    connection.execute("BEGIN IMMEDIATE")
+    try:
+        history = json.loads(get_setting(connection, key, "[]"))
+        if not isinstance(history, list):
+            raise ValueError("Historial de similitud inválido; se esperaba una lista.")
+        history = history[-RECENT_IMAGE_WINDOW:]
+        for previous in reversed(history):
+            if recent_images_are_similar(signature, previous):
+                connection.rollback()
+                return previous["label"]
+        history.append(signature)
+        connection.execute(
+            "INSERT INTO pipeline_config (clave, valor) VALUES (?, ?) "
+            "ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor, actualizado_en=CURRENT_TIMESTAMP",
+            (key, json.dumps(history[-RECENT_IMAGE_WINDOW:], ensure_ascii=False)),
+        )
+        connection.commit()
+        return None
+    except Exception:
+        connection.rollback()
+        raise
+
+
 def command_ingest(args: argparse.Namespace, selected: dict) -> int:
     if args.limit is not None and args.limit < 1:
         raise ValueError("--limit debe ser un entero positivo.")
@@ -1516,10 +1593,14 @@ def command_ingest(args: argparse.Namespace, selected: dict) -> int:
     if args.execute and plans:
         ensure_database(database)
     plans, pre_skipped_duplicates, pre_skipped_analyzed, recovered_cached = (
-        filter_duplicate_plans(plans, database, args.provider, model, args.limit)
+        filter_duplicate_plans(
+            plans, database, args.provider, model,
+            None if args.provider != "none" else args.limit,
+        )
     )
     print(
-        f"Imágenes nuevas para analizar: {len(plans) - recovered_cached}; "
+        f"Candidatas nuevas para analizar: {len(plans) - recovered_cached}; "
+        f"máximo de envíos iniciales={args.limit}; "
         f"análisis aceptados pendientes de importar={recovered_cached}; "
         f"proveedor={args.provider}; "
         f"formatos no admitidos omitidos={skipped_remote_format}; "
@@ -1545,6 +1626,14 @@ def command_ingest(args: argparse.Namespace, selected: dict) -> int:
         return 0
 
     imported = 0
+    initial_sends = 0
+    similar_skipped = 0
+    unreadable_images = 0
+    if args.provider != "none":
+        print(
+            f"Filtro de similitud activo: últimas {RECENT_IMAGE_WINDOW} prendas "
+            f"del lote/proveedor {args.provider}; historial conservado entre lotes."
+        )
     skipped = pre_skipped_duplicates
     rejected = 0
     cache_hits = 0
@@ -1596,6 +1685,29 @@ def command_ingest(args: argparse.Namespace, selected: dict) -> int:
                 if annotation is not None:
                     cache_hits += 1
                 else:
+                    if initial_sends >= args.limit:
+                        break
+                    try:
+                        signature = recent_image_signature(
+                            item["path"], item["digest"], f"{source_id}/{item['relative_path']}"
+                        )
+                    except (OSError, ValueError) as error:
+                        unreadable_images += 1
+                        print(f"Imagen ilegible omitida antes de IA: {item['relative_path']} — {error}")
+                        continue
+                    if CANCEL_REQUESTED.is_set():
+                        stopped = True
+                        break
+                    similar_to = reserve_recent_image(connection, args.provider, signature)
+                    if similar_to is not None:
+                        similar_skipped += 1
+                        print(
+                            f"Omitida por alta similitud con las últimas {RECENT_IMAGE_WINDOW} "
+                            f"prendas enviadas ({args.provider}): {source_id}/{item['relative_path']} "
+                            f"— similar a {similar_to}. Se evalúa la siguiente candidata."
+                        )
+                        continue
+                    initial_sends += 1
                     try:
                         (
                             annotation,
@@ -1790,6 +1902,9 @@ def command_ingest(args: argparse.Namespace, selected: dict) -> int:
 
     print(
         f"Importadas: {imported}; duplicadas omitidas: {skipped}; "
+        f"similares omitidas antes de IA: {similar_skipped}; "
+        f"imágenes ilegibles omitidas: {unreadable_images}; "
+        f"envíos iniciales: {initial_sends}; "
         f"ya analizadas omitidas: {pre_skipped_analyzed}; "
         f"descartadas por IA: {rejected}; análisis reutilizados: {cache_hits}; "
         f"respuestas inválidas omitidas: {invalid_annotations}; "

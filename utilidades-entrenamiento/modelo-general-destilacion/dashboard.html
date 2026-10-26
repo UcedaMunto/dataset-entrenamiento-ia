@@ -75,7 +75,7 @@
       <form id="ingestForm">
         <div class="job-grid">
           <div><label for="sourceSelect">Fuente</label><select id="sourceSelect" required></select></div>
-          <div><label for="batchLimit">Máximo de imágenes nuevas por proveedor</label><input id="batchLimit" type="number" min="1" max="15000" value="10" required><small class="muted">Se buscan en todas las fuentes elegibles y se omiten las ya importadas o analizadas por ese proveedor.</small></div>
+          <div><label for="batchLimit">Máximo de imágenes nuevas por proveedor</label><input id="batchLimit" type="number" min="1" max="15000" value="10" required><small class="muted">Se buscan en todas las fuentes elegibles. Se omiten las ya importadas, analizadas o muy similares a las últimas 10 enviadas por ese proveedor. Las omitidas no consumen el límite.</small></div>
         </div>
         <div class="job-checks">
           <strong>Proveedores (puedes ejecutar NIM y DeepSeek en paralelo)</strong>
@@ -86,7 +86,7 @@
           <label id="remoteConsentRow" hidden><input id="confirmRemote" type="checkbox" checked><span>Autorizo enviar imágenes a los proveedores seleccionados; los modelos NIM alternativos también pueden recibirlas y, si NIM descarta, puede consultarse DeepSeek. Si DeepSeek falla, puede usarse NIM cuando esté configurado. Esto puede aumentar el consumo/costo y compartir la imagen con otro proveedor.</span></label>
         </div>
         <div class="row"><button id="startIngestButton" class="primary" type="submit">▶ Iniciar ejecuciones seleccionadas</button><span id="jobMessage" role="status" class="muted">Selecciona uno o ambos proveedores.</span></div>
-        <p class="muted">El límite aplica por proveedor seleccionado: con ambos seleccionados se procesan hasta 10.000 análisis iniciales combinados. Los fallbacks de modelo/proveedor pueden generar análisis adicionales fuera de ese límite. Detener un proveedor no afecta al otro; la imagen que ya esté en análisis y su fallback pueden terminar antes de cerrar ese lote.</p>
+        <p class="muted">El límite aplica por proveedor seleccionado: cada uno dispone del máximo indicado de envíos iniciales. Las imágenes omitidas por similitud no consumen ese máximo. Los fallbacks de modelo/proveedor pueden generar análisis adicionales fuera de ese límite. Detener un proveedor no afecta al otro; la imagen que ya esté en análisis y su fallback pueden terminar antes de cerrar ese lote.</p>
       </form>
       <div id="providerJobs" class="provider-jobs" aria-live="polite"></div>
     </section>

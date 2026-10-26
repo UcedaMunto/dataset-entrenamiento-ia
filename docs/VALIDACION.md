@@ -79,15 +79,15 @@ Desde la raíz, validar navegación local y cobertura del índice:
 ```bash
 python3 docs/validar_documentacion.py
 docker compose -f utilidades-entrenamiento/docker-compose.yaml --profile gpu --profile monitor --profile monitor-gpu config --quiet
-docker compose -f utilidades-entrenamiento/compose.cpu-api.yaml config --quiet
-docker compose -f utilidades-entrenamiento/modelo-general-destilacion/compose.yml config --quiet
+docker compose config --quiet
+docker compose --profile tools config --quiet
 ```
 
 Con los contenedores actuales en marcha (los nombres pueden variar según el proyecto Compose):
 
 ```bash
-docker exec utilidades-entrenamiento-monitor-1 python -m unittest discover -s /app/tests -v
-docker exec modelo-general-destilacion-dashboard-1 python -m unittest discover -s /app/tests -v
+docker exec modelo-reconocimiento-prendas-monitor-1 python -m unittest discover -s /app/tests -v
+docker exec modelo-reconocimiento-prendas-dashboard-1 python -m unittest discover -s /app/tests -v
 curl --fail-with-body http://127.0.0.1:8090/api/models
 curl --fail-with-body http://127.0.0.1:8787/api/jobs
 curl --fail-with-body http://127.0.0.1:8081/health

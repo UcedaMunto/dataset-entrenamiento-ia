@@ -17,16 +17,24 @@ Las dos interfaces tienen responsabilidades complementarias:
 
 El panel de dataset está en `utilidades-entrenamiento/modelo-general-destilacion/`. El de entrenamiento está en `utilidades-entrenamiento/`. Se comunican mediante el dataset montado en Docker: el curador escribe imágenes y SQLite, y el entrenador los lee en solo lectura. Los pesos y resultados se guardan por separado en `modelo-ia/`; el modelo recomendado se conserva en `modelos-compartidos/`.
 
-Para iniciar el monitor CPU desde la raíz:
+Para iniciar las tres interfaces (panel de dataset, panel de entrenamiento y API CPU) desde la raíz, preparar una sola vez el `.env` de curación y levantar el Compose unificado:
+
+```bash
+[ -f utilidades-entrenamiento/modelo-general-destilacion/.env ] || cp utilidades-entrenamiento/modelo-general-destilacion/.env.example utilidades-entrenamiento/modelo-general-destilacion/.env
+chmod 600 utilidades-entrenamiento/modelo-general-destilacion/.env
+docker compose up -d --build
+```
+
+Esto deja el panel de dataset en `http://127.0.0.1:8787/`, el panel de entrenamiento en `http://127.0.0.1:8090/` y la API CPU en `http://127.0.0.1:8081/docs`. Las claves se mantienen locales; el panel de dataset usa red del host y escucha solo en localhost, y la API y el monitor publican sus puertos también en localhost. En una máquina remota se accede con un túnel SSH. El checkpoint de la API se puede cambiar con `MODEL_CHECKPOINT` (ruta absoluta).
+
+El entrenamiento por terminal se mantiene en el Compose de entrenamiento:
 
 ```bash
 docker compose -f utilidades-entrenamiento/docker-compose.yaml build train
-docker compose -f utilidades-entrenamiento/docker-compose.yaml --profile monitor up -d monitor
+docker compose -f utilidades-entrenamiento/docker-compose.yaml run --rm train
 ```
 
-Para iniciar curación, desde su carpeta, preparar `.env` a partir de `.env.example` si aún no existe, configurar los proveedores y ejecutar `docker compose -f compose.yml up -d --build dashboard`. Las claves se mantienen locales. El dashboard usa red del host y escucha en localhost; el monitor publica el puerto 8090 también en localhost. En una máquina remota se accede con un túnel SSH.
-
-Los servicios `train` y `train-gpu` permiten entrenar por terminal. Los perfiles `monitor` y `monitor-gpu` habilitan el panel con CPU o acceso a una GPU local. Se utiliza una GPU por equipo: las memorias de laptops distintas no se suman. CPU es una alternativa funcional, cuyo tiempo de entrenamiento depende del hardware y del dataset. La API CPU independiente se levanta con `compose.cpu-api.yaml` y requiere indicar la ruta absoluta al checkpoint mediante `MODEL_CHECKPOINT`.
+Los servicios `train` y `train-gpu` permiten entrenar por terminal. El panel de entrenamiento se sirve con el servicio `monitor` del Compose unificado. Se utiliza una GPU por equipo: las memorias de laptops distintas no se suman. CPU es una alternativa funcional, cuyo tiempo de entrenamiento depende del hardware y del dataset.
 
 El resultado buscado es un clasificador reproducible y pequeño, con artefactos identificables y métricas explícitas. La integración con una plataforma OpenStack/Kubernetes es una etapa posterior; no forma parte del despliegue Compose actual.
 

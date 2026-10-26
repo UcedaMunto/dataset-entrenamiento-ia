@@ -68,7 +68,7 @@ Las cifras de validación son instantáneas comprobadas; los planes y V1 contien
 ## Archivos técnicos relacionados
 
 - [Esquema base](../documentacion_dataset/schema.sql) y [creación de estructura](../documentacion_dataset/crear_estructura.sh).
-- [Compose entrenamiento](../utilidades-entrenamiento/docker-compose.yaml), [Compose curación](../utilidades-entrenamiento/modelo-general-destilacion/compose.yml) y [Compose API CPU](../utilidades-entrenamiento/compose.cpu-api.yaml).
+- [Compose unificado (dataset + entrenamiento + API CPU)](../docker-compose.yaml) y [Compose entrenamiento por terminal](../utilidades-entrenamiento/docker-compose.yaml).
 - [Configuración de entrenamiento](../utilidades-entrenamiento/configs/default.yaml) y [fuentes](../utilidades-entrenamiento/modelo-general-destilacion/sources.json).
 - [Validador documental](validar_documentacion.py): ejecutar `python3 docs/validar_documentacion.py` desde la raíz. Comprueba enlaces locales, anclas y cobertura del índice, sin red ni escrituras.
 

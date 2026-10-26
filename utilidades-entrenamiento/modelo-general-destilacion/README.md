@@ -12,11 +12,11 @@ El máximo actual del panel es **15.000 imágenes nuevas por proveedor**; 5.000 
 
 El usuario confirma que las imágenes agregadas tienen permiso de uso comercial libre. Las páginas/README locales de ambos repositorios de clothing también indican uso libre/comercial y sus copias incluyen LICENSE CC0. La ingesta conserva fuente y etiqueta original por imagen para mantener trazabilidad.
 
-Ejecuta la auditoría para comprobar el contenido actual:
+Ejecuta la auditoría para comprobar el contenido actual (desde la raíz del proyecto):
 
 ```bash
-docker compose -f compose.yml build
-docker compose -f compose.yml run --rm curator audit
+docker compose build dashboard
+docker compose --profile tools run --rm curator audit
 ```
 
 | Fuente | Carpetas esperadas bajo `datos-crudos/` | Uso y mapeo inicial |
@@ -32,7 +32,7 @@ La configuración/mapeos editables están en [`sources.json`](./sources.json). E
 
 ## Arquitectura mínima
 
-- [`compose.yml`](./compose.yml): servicio efímero `curator`; monta `datos-crudos/` en solo lectura y el dataset SQLite/carpeta del proyecto en escritura.
+- [Compose unificado](../../docker-compose.yaml): servicios `dashboard` (panel) y `curator` (perfil `tools`); montan `datos-crudos/` en solo lectura y el dataset SQLite/carpeta del proyecto en escritura.
 - [`Dockerfile`](./Dockerfile): Python 3.12 con Pillow y Requests.
 - [`app.py`](./app.py): auditoría, mapeo de clases, importación, hash para evitar duplicados, cache por configuración y anotación visual opcional con fallback de proveedor/modelo.
 - [`sources.json`](./sources.json): directorios, licencia declarada, clases que se admiten y mapeos al catálogo actual.
@@ -68,7 +68,7 @@ Las imágenes se envían en su formato y bytes originales como data URL; el MIME
 
 Para reducir respuestas largas de NIM, solo ese proveedor recibe instrucciones más estrictas: descripciones y motivos de descarte de hasta **8 palabras**, y un máximo de **2 colores, 2 estilos y 2 temporadas**. DeepSeek conserva sus límites previos de 12 palabras y hasta 3 valores por lista. Si DeepSeek falla por HTTP/red, timeout o respuesta inválida, el mismo análisis se intenta automáticamente con NVIDIA NIM cuando la clave está configurada; los resultados se guardan bajo el proveedor/modelo que efectivamente respondió. Si NIM no está configurado, el error se informa y la imagen no se presenta como procesada. En sentido inverso, una respuesta válida de descarte de NIM (no un error) puede iniciar una evaluación adicional de DeepSeek cuando esté configurado; si DeepSeek la acepta, se importa y la descripción queda atribuida a ese proveedor. Se conservan ambos análisis válidos en SQLite para auditar la diferencia. Si DeepSeek también descarta, la imagen se mantiene descartada. Al seleccionar NIM y DeepSeek en paralelo desde el dashboard, se desactiva únicamente el fallback automático NIM→DeepSeek para evitar duplicar esa evaluación; el lote DeepSeek independiente sigue teniendo su respaldo a NIM ante fallo. Los fallbacks usan imágenes en otro modelo/proveedor y pueden sumar llamadas/costos fuera del cupo inicial. La confirmación remota del dashboard advierte este envío cruzado. En “Prendas incorporadas y descartadas”, el dashboard separa las incorporadas y las descartadas por proveedor. Para análisis antiguos que no registraban la ruta original, busca la imagen fuente por su hash SHA-256. El panel “Resultados válidos por modelo” cuenta los análisis guardados en SQLite, separados en aceptados y descartados; una respuesta inválida que no se guarda no se suma a esos totales. Los registros de lote se muestran por proveedor, se pueden congelar visualmente sin pausar inferencias y permiten borrar las líneas clasificadas como errores sin borrar análisis de SQLite.
 
-No pongas claves en `compose.yml`, argumentos de shell, SQLite ni commits. No se envían etiquetas sin mapeo, imágenes >200.000 bytes ni formatos incompatibles. Antes de aplicar `--limit`, la ingesta quita hashes que ya están en el dataset y repeticiones dentro del plan; por eso las siguientes ejecuciones avanzan a imágenes nuevas en vez de volver a seleccionar las primeras ya importadas. El registro informa cuántas duplicadas se omitieron antes de la IA. Para usar APIs remotas se requieren explícitamente `--allow-remote`, `--limit` y `--execute`. Los errores HTTP/red del proveedor detienen el lote; respuestas de IA con estructura inválida se omiten y el lote continúa.
+No pongas claves en el Compose, argumentos de shell, SQLite ni commits. No se envían etiquetas sin mapeo, imágenes >200.000 bytes ni formatos incompatibles. Antes de aplicar `--limit`, la ingesta quita hashes que ya están en el dataset y repeticiones dentro del plan; por eso las siguientes ejecuciones avanzan a imágenes nuevas en vez de volver a seleccionar las primeras ya importadas. El registro informa cuántas duplicadas se omitieron antes de la IA. Para usar APIs remotas se requieren explícitamente `--allow-remote`, `--limit` y `--execute`. Los errores HTTP/red del proveedor detienen el lote; respuestas de IA con estructura inválida se omiten y el lote continúa.
 
 ## Uso seguro y reproducible
 
@@ -90,27 +90,27 @@ Si un lote termina con `El destino ya existe y no está registrado`, el importad
 2. Audita sin escribir ni contactar proveedores:
 
    ```bash
-   docker compose -f compose.yml run --rm curator audit
+   docker compose --profile tools run --rm curator audit
    ```
 
 3. Ensaya el mapeo de una fuente:
 
    ```bash
-   docker compose -f compose.yml run --rm curator ingest \
+   docker compose --profile tools run --rm curator ingest \
      --source clothing-small --provider none
    ```
 
 4. Importa sin enviar imágenes a terceros:
 
    ```bash
-   docker compose -f compose.yml run --rm curator ingest \
+   docker compose --profile tools run --rm curator ingest \
      --source clothing-small --provider none --execute
    ```
 
 5. Solo para una muestra pequeña que hayas autorizado, configura `.env` y limita explícitamente una prueba remota:
 
    ```bash
-   docker compose -f compose.yml run --rm curator ingest \
+   docker compose --profile tools run --rm curator ingest \
      --source mendeley-aig --provider nim --allow-remote --limit 10 --execute
    ```
 
@@ -135,7 +135,7 @@ Al aplicar el límite de imágenes nuevas, el curador no sigue el orden alfabét
 Al importar una imagen, los colores, estilos y temporadas propuestos por la IA se guardan en `valor_propiedad_prenda` (sin `unknown`; `summer` y `spring` se normalizan a `verano` y `primavera`), además del JSON de `descripcion_prenda.atributos_sugeridos`. La prenda sigue `pendiente` y sin `apta_para_entrenamiento`, así que `train.py` no la usa hasta que se apruebe. Para rellenar prendas importadas antes de este cambio, o tras un lote que corrió con código viejo:
 
 ```bash
-docker compose run --rm --no-deps --entrypoint python curator /app/app.py sync-properties
+docker compose --profile tools run --rm --no-deps --entrypoint python curator /app/app.py sync-properties
 ```
 
 ## Galería de prendas
@@ -146,12 +146,24 @@ Se navega de 15 en 15 (primera/anterior/números/siguiente/última, ir a página
 filtrar por categoría y proveedor. Los datos salen de `valor_propiedad_prenda` y, como respaldo, de
 `descripcion_prenda.atributos_sugeridos`. API: `/api/gallery?page=&category=&provider=`.
 
+## Filtro antes del envío a la IA: últimas diez prendas
+
+Antes de un análisis remoto nuevo, se compara la candidata con las **últimas 10 prendas reservadas para envío inicial por el proveedor del lote**. Si presenta alta similitud, se omite sin consultar la IA y se continúa buscando otra candidata. Las omitidas no consumen el límite de envíos; el lote puede revisar más candidatas para completar el máximo solicitado.
+
+El filtro combina dHash de 64 bits (distancia máxima 2), proporción de imagen (diferencia máxima del 3 %) y una miniatura RGB de 32 × 32. Para omitir exige diferencia media máxima de 8 por canal y diferencia máxima local de 32 en escala 0–255. Es un criterio conservador para copias, recompresiones y variaciones pequeñas; no es una evaluación semántica ni garantiza detectar todos los recortes o cambios de fondo. El color evita depender únicamente de la silueta en escala de grises.
+
+El historial se guarda en `pipeline_config` bajo `recent_sent_images_v1:<proveedor>` y conserva solo diez miniaturas/huellas por proveedor entre lotes y reinicios. Se reserva inmediatamente antes de invocar la anotación, incluso si ese intento termina en descarte, timeout o respuesta inválida. Las etapas, reintentos y fallbacks de esa prenda no añaden entradas. La reserva es atómica y libera SQLite antes de esperar al proveedor. NIM y DeepSeek mantienen historiales separados para conservar la posibilidad de evaluación cruzada. El historial empieza al utilizar esta versión; no reconstruye envíos antiguos.
+
+La comparación se aplica a nuevas solicitudes remotas, no a `--provider none` ni a resultados ya cacheados. No borra archivos, no cambia aprobaciones y no guarda las omitidas como descartes de IA. Una candidata omitida puede volver a evaluarse cuando la referencia deje de estar entre las diez últimas; no es una lista permanente de exclusión.
+
+En el registro del dashboard aparece `Omitida por alta similitud...` con su referencia; al terminar se informa `similares omitidas antes de IA` y `envíos iniciales`. El cambio requiere recrear el dashboard con la imagen actualizada; un lote ya en curso conserva el código con el que arrancó.
+
 ## Limpieza de imágenes duplicadas
 
 El dataset de origen (sobre todo `mendeley-aig`) trae la misma foto repetida con pequeñas variaciones, por lo que el
 SHA-256 no las detecta. Flujo:
 
-1. `docker compose -f compose.yml run --rm --no-deps --entrypoint python curator /app/app.py find-duplicates [--threshold 2]`
+1. `docker compose --profile tools run --rm --no-deps --entrypoint python curator /app/app.py find-duplicates [--threshold 2]`
    calcula un dHash de 64 bits por imagen (tabla `imagen_huella`) y agrupa las que están a distancia de Hamming
    <= umbral (tablas `grupo_duplicado` y `grupo_duplicado_miembro`). Es repetible; solo recalcula los grupos pendientes.
    Con umbral 6 el encadenamiento fusiona miles de imágenes distintas, por eso el valor por defecto es 2.

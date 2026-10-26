@@ -24,16 +24,15 @@ La GPU física está confirmada por PCI, pero no está disponible para entrenami
 
 ## Interfaz de entrenamiento
 
-El servicio `train` ejecuta entrenamiento por terminal y no publica puertos; por eso no aparece una URL en `docker ps`. Para abrir el panel de seguimiento, ejecuta desde este directorio:
+El servicio `train` ejecuta entrenamiento por terminal y no publica puertos; por eso no aparece una URL en `docker ps`. El panel de seguimiento (`monitor`) forma parte del [Compose unificado](../docker-compose.yaml); desde la raíz del proyecto:
 
 ```bash
-docker compose build
-docker compose --profile monitor up -d monitor
+docker compose up -d --build
 ```
 
-Abre `http://127.0.0.1:8090`. El panel permite iniciar o detener el entrenamiento, revisar progreso/métricas y probar los modelos guardados. Para detener el panel: `docker compose --profile monitor down`. Si Docker corre en otra máquina, usa un túnel SSH para el puerto 8090; el panel se enlaza solo a localhost.
+Abre `http://127.0.0.1:8090`. El panel permite iniciar o detener el entrenamiento, revisar progreso/métricas y probar los modelos guardados. Para detener solo el panel: `docker compose stop monitor`. Si Docker corre en otra máquina, usa un túnel SSH para el puerto 8090; el panel se enlaza solo a localhost.
 
-El dashboard de curación de datos es independiente y se sirve en `http://127.0.0.1:8787`; sus instrucciones están en [`modelo-general-destilacion/README.md`](./modelo-general-destilacion/README.md).
+El dashboard de curación de datos se sirve en `http://127.0.0.1:8787` y la API CPU en `http://127.0.0.1:8081/docs`, también desde el Compose unificado; sus instrucciones están en [`modelo-general-destilacion/README.md`](./modelo-general-destilacion/README.md) y en esta guía.
 
 ### Prueba CPU de un modelo ya entrenado
 
@@ -121,15 +120,21 @@ La metodología, comando de terminal, resultados actuales y limitaciones están 
 - El checkpoint compartido [`modelos-compartidos/mobilenetv3-small-best.pt`](./modelos-compartidos/README.md), compatible con `MobileNetV3-Small` y con el catálogo de clases almacenado en el propio archivo.
 - Memoria y CPU suficientes para mantener el proceso y ejecutar inferencias. En el host de desarrollo medimos 12 CPU lógicas y 15 GiB RAM; esto no es un mínimo universal ni mide tiempo de entrenamiento.
 
-Desde `utilidades-entrenamiento/`, selecciona un checkpoint que exista en esa VM y levanta la API:
+Desde la raíz del proyecto, selecciona un checkpoint que exista en esa VM y levanta la API con el Compose unificado (junto al panel de dataset):
 
 ```bash
-export MODEL_CHECKPOINT="$PWD/modelos-compartidos/mobilenetv3-small-best.pt"
+export MODEL_CHECKPOINT="$PWD/utilidades-entrenamiento/modelos-compartidos/mobilenetv3-small-best.pt"
 export API_CPU_THREADS=4
-docker compose -f compose.cpu-api.yaml up -d --build
+docker compose up -d --build
 ```
 
-`MODEL_CHECKPOINT` debe ser una ruta absoluta al archivo del host; Compose lo monta como `/models/best.pt` de solo lectura. La única carpeta de datos que recibe el contenedor es el checkpoint. `API_CPU_THREADS` limita los hilos de PyTorch (predeterminado: 4). No inicies esta API con el Compose de entrenamiento ni con el dashboard de curación: tiene su propio archivo y servicio.
+Para levantar solo esta API sin el panel de dataset:
+
+```bash
+docker compose up -d --build inference-api
+```
+
+`MODEL_CHECKPOINT` debe ser una ruta absoluta al archivo del host; si se omite se usa el checkpoint compartido `utilidades-entrenamiento/modelos-compartidos/mobilenetv3-small-best.pt`. Compose lo monta como `/models/best.pt` de solo lectura. La única carpeta de datos que recibe el contenedor es el checkpoint. `API_CPU_THREADS` limita los hilos de PyTorch (predeterminado: 4). Esta API ya no usa un Compose propio: forma parte del [Compose unificado](../docker-compose.yaml) junto con el dashboard de curación.
 
 Comprobación de salud:
 
@@ -169,8 +174,10 @@ Luego usa `http://127.0.0.1:8081` en esa computadora. No publiques el puerto dir
 Detener el servicio:
 
 ```bash
-docker compose -f compose.cpu-api.yaml down
+docker compose stop inference-api
 ```
+
+(o `docker compose down` para detener también el panel de dataset).
 
 Para cambiar checkpoint, detén el servicio, actualiza `MODEL_CHECKPOINT` y vuelve a levantarlo. La prueba CPU de entrenamiento no forma parte de esta API; inferencia rápida no demuestra que entrenar todo el dataset en CPU sea viable.
 

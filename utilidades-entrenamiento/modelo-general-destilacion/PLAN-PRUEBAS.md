@@ -28,6 +28,10 @@ Cobertura:
 
 Resultado esperado: todos los tests pasan; ningún test conoce ni carga API keys.
 
+### Filtro de similitud previo a la IA
+
+La suite `tests/test_recent_similarity.py` verifica que una copia recompresa/redimensionada se omite antes de llamar al proveedor; que una candidata distinta posterior completa el límite; que se conservan diferencias de color, forma y proporción; y que solo las últimas diez reservas permanecen en la ventana. Comprueba además persistencia entre lotes, separación por proveedor, reserva concurrente atómica, recuperación de caché sin un envío nuevo, continuidad ante imágenes ilegibles y ausencia de cambios en la importación sin IA. Las pruebas usan imágenes y SQLite temporales, con proveedores simulados. La suite completa actualizada pasó **72 pruebas** el 23-10-2026 dentro de la imagen Docker construida, con `--network none`, sin credenciales ni montaje del dataset real.
+
 ## 2. Auditoría de fuentes (solo lectura)
 
 ```bash
