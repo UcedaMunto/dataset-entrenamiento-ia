@@ -55,6 +55,8 @@ table,div[style]{break-inside:avoid}@page{margin:12mm}}
 <pre id="log" class="muted" style="max-height:10rem;overflow:auto;margin:.5rem 0 0"></pre></div>
 <div class="card"><button id="try">Probar modelo en CPU</button>
 <button id="eval">Evaluar precisión por propiedad</button></div>
+<div class="card"><button id="dsr">Ejecutar prueba DSR de la API</button>
+<span id="dsrstate" class="muted"></span><div id="dsrout"></div></div>
 <dialog id="edlg" style="width:min(940px,96vw)"><h3>Precisión por propiedad</h3>
 <p class="noprint"><label>Modelo: <select id="erun"></select></label>
 <label>Fotos: <select id="esplit"><option value="test">test (no usadas para entrenar)</option>
@@ -213,6 +215,16 @@ $('ego').onclick=async()=>{const q='run='+encodeURIComponent($('erun').value)+'&
 $('start').onclick=async()=>{pick=true;await post('/api/start')};
 $('continue').onclick=()=>post('/api/continue?run='+encodeURIComponent($('run').value)+'&strategy='+encodeURIComponent($('strategy').value));
 $('stop').onclick=()=>post('/api/stop');
+$('dsr').onclick=async()=>{const s=$('dsrstate'),o=$('dsrout');s.textContent='Ejecutando prueba DSR (1.424 imágenes, ~15 s)…';o.replaceChildren();
+ try{const r=await fetch('http://127.0.0.1:8082/test/run',{method:'POST'});
+  if(!r.ok){s.textContent='Error '+r.status+': '+(await r.text()).slice(0,200);return}
+  const d=await r.json(),m=d.promedio_macro_propiedades;
+  s.textContent='Prueba completada: '+new Date().toLocaleString();
+  o.replaceChildren(summary([['Imágenes evaluadas',d.imagenes_evaluadas],['Acierto tipo',d.tipo_prenda.accuracy_pct+'%'],
+   ['Jaccard color',d.color.coincidencia_parcial_jaccard_pct+'%'],['Jaccard estilo',d.estilo.coincidencia_parcial_jaccard_pct+'%'],
+   ['Promedio macro',m.porcentaje+'%'],['Criterio R11 (≥70%)',m.porcentaje>=70?'Cumple':'No cumple']]));
+  const p=document.createElement('p');p.className='muted';p.textContent='Reporte guardado en '+d.resultado_guardado+' (run_id '+d.run_id+').';o.append(p);
+ }catch(e){s.textContent='No se pudo conectar con la API de pruebas (http://127.0.0.1:8082): '+e}}
 (async()=>{await status();await runs();await refresh();$('run').onchange=refresh;setInterval(async()=>{await status();await runs();refresh()},3000)})();
 </script></body></html>"""
 
