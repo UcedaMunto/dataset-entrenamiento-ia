@@ -5,6 +5,8 @@
 #                    Inicia/detiene entrenamientos y muestra métricas.
 #   inference-api -> API CPU independiente (http://127.0.0.1:8081/docs).
 #                    Sirve la IA ya entrenada y genera descripciones.
+#   test-api      -> API de pruebas DSR (http://127.0.0.1:8082/docs).
+#                    Ejecuta la prueba de la API sobre tests/imagenes-test/.
 #
 # El servicio `curator` (perfil "tools") conserva los comandos CLI de curación
 # (audit, ingest, find-duplicates, sync-properties, approve-generated...).
@@ -48,6 +50,31 @@ services:
       - "${MODEL_CHECKPOINT:-./utilidades-entrenamiento/modelos-compartidos/mobilenetv3-small-best.pt}:/models/best.pt:ro"
     ports:
       - "127.0.0.1:8081:8080"
+    restart: unless-stopped
+
+  test-api:
+    image: modelo-reconocimiento-test-api:cpu
+    build:
+      context: ./utilidades-entrenamiento
+      dockerfile: Dockerfile
+    init: true
+    user: "${TRAINING_UID:-1000}:${TRAINING_GID:-1000}"
+    shm_size: 1g
+    entrypoint: ["python", "/app/test_api.py"]
+    environment:
+      MODEL_CHECKPOINT: /models/best.pt
+      API_CPU_THREADS: "${API_CPU_THREADS:-4}"
+      TEST_IMAGES_ROOT: /app/test-imagenes
+      TEST_RESULTS_DIR: /app/test-resultados
+      TEST_DESIGN_DOC: /app/test-design.md
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - "${MODEL_CHECKPOINT:-./utilidades-entrenamiento/modelos-compartidos/mobilenetv3-small-best.pt}:/models/best.pt:ro"
+      - ./tests/imagenes-test:/app/test-imagenes:ro
+      - ./tests/resultados:/app/test-resultados
+      - ./docs/DSR-PRUEBA-API.md:/app/test-design.md:ro
+    ports:
+      - "127.0.0.1:8082:8082"
     restart: unless-stopped
 
   monitor:

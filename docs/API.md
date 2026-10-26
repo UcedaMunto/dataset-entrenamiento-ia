@@ -2,7 +2,7 @@
 
 [Índice](INDICE.md) · [Validación](VALIDACION.md) · [Resumen](<../readme resumen.md>)
 
-Referencia contrastada con los handlers del código el **23-10-2026**. Las respuestas JSON son las de la implementación actual; no existe un contrato OpenAPI para los paneles. La API CPU sí publica `/openapi.json` y `/docs`. La validación HTTP realizada fue de consulta; los POST se revisaron mediante código y pruebas automatizadas.
+Referencia contrastada con los handlers del código el **23-10-2026**. Las respuestas JSON son las de la implementación actual; no existe un contrato OpenAPI para los paneles. La API CPU y la API de pruebas publican `/openapi.json` y `/docs`. La validación HTTP realizada fue de consulta; los POST se revisaron mediante código y pruebas automatizadas.
 
 ## Monitor de entrenamiento — puerto 8090
 
@@ -79,3 +79,26 @@ JPEG, PNG o WebP; máximo 10 MiB y 25 megapíxeles por archivo. Devuelve `descri
 Arranque y ejemplo de petición: [guía de despliegue CPU](../utilidades-entrenamiento/README.md#api-de-inferencia-en-una-vm-con-cpu).
 
 Instalación directa con Python: [guía nativa](INSTALACION-NATIVA.md) y [manual DOCX APA 7](Instalacion_nativa_API_prendas_APA7.docx). En instalación nativa se recomienda enlazar `127.0.0.1:8081` con Uvicorn.
+
+## API de pruebas (DSR) — puerto 8082 del host
+
+Implementación: [`test_api.py`](../utilidades-entrenamiento/test_api.py). Ejecuta la prueba de la API de descripción de prendas sobre el conjunto portable [`tests/imagenes-test/`](../tests/imagenes-test/), sin usar el dataset completo. Diseño: [DSR-PRUEBA-API.md](DSR-PRUEBA-API.md).
+
+| Método | Ruta | Contrato |
+|---|---|---|
+| GET | `/health` | Estado, checkpoint y total de imágenes del manifest |
+| GET | `/docs`, `/openapi.json` | Documentación y esquema FastAPI |
+| GET | `/test/design` | Resumen JSON del diseño DSR |
+| GET | `/test/design/markdown` | Documento de diseño DSR en Markdown |
+| GET | `/test/manifest` | Resumen del manifest: clases, conteos por tipo, sin color/estilo |
+| GET | `/test/images?page=1&page_size=50` | Lista paginada de imágenes y etiquetas de referencia |
+| POST | `/test/run?max_images=10&device=cpu` | Ejecuta la prueba (completa o limitada) y guarda el reporte |
+| GET | `/test/results` | Reportes guardados con su promedio macro |
+| GET | `/test/results/{run_id}` | Reporte completo guardado |
+
+`max_images` opcional permite una prueba de humo; `device` admite `cpu` (por defecto) o `cuda`. Los reportes se guardan en `tests/resultados/reporte_*.json` (carpeta ignorada por Git). Ejemplo:
+
+```bash
+curl -X POST "http://127.0.0.1:8082/test/run?max_images=10"
+curl "http://127.0.0.1:8082/test/results"
+```

@@ -13,7 +13,10 @@ Las cifras de validación son instantáneas comprobadas; los planes y V1 contien
 | [Reconocimiento de prendas — V2](<../README.md>) | Guía del módulo; atender a fechas de mediciones y decisiones pendientes. |
 | [Instalación nativa del modelo entrenado y su API](INSTALACION-NATIVA.md) | Instalación directa con Python; contrato de una imagen; verificación nativa. |
 | [Manual Word APA 7](Instalacion_nativa_API_prendas_APA7.docx) | Documento editable de instalación, configuración y operación sin contenedores. |
-| [Referencia de endpoints locales](<API.md>) | Contratos HTTP de las dos interfaces y la API CPU. |
+| [Referencia de endpoints locales](<API.md>) | Contratos HTTP de los paneles, la API CPU y la API de pruebas. |
+| [Diseño de prueba DSR — API de descripción de prendas](<DSR-PRUEBA-API.md>) | Prueba de una página basada en Design Science Research. |
+| [README-TEST — Ejecutar la prueba](<../README-TEST.md>) | Guía rápida para correr la prueba con la API. |
+| [README-PRUEBA — Cómo se hizo la prueba](<../README-PRUEBA.md>) | Detalle en dos páginas de la ejecución y los resultados. |
 | [Índice de documentación](<INDICE.md>) | Guía del módulo; atender a fechas de mediciones y decisiones pendientes. |
 | [Validación de documentación e implementación](<VALIDACION.md>) | Comprobaciones del 23-10-2026 y pendientes. |
 | [Resumen del proyecto de reconocimiento de prendas](<../readme resumen.md>) | Resumen en cuatro bloques para impresión. |
@@ -47,6 +50,7 @@ Las cifras de validación son instantáneas comprobadas; los planes y V1 contien
 | [Chaqueta](<../dataset/superior/chaquetas/README.md>) | Guía de clasificación y estructura. |
 | [Suéter](<../dataset/superior/sueteres/README.md>) | Guía de clasificación y estructura. |
 | [Documentación del dataset](<../documentacion_dataset/README.md>) | Guía de clasificación y estructura. |
+| [Conjunto portable de prueba](<../tests/imagenes-test/README.md>) | 1.424 imágenes del split test con manifest para la API de pruebas. |
 
 ## Teoría y antecedentes
 
@@ -68,7 +72,7 @@ Las cifras de validación son instantáneas comprobadas; los planes y V1 contien
 ## Archivos técnicos relacionados
 
 - [Esquema base](../documentacion_dataset/schema.sql) y [creación de estructura](../documentacion_dataset/crear_estructura.sh).
-- [Compose unificado (dataset + entrenamiento + API CPU)](../docker-compose.yaml) y [Compose entrenamiento por terminal](../utilidades-entrenamiento/docker-compose.yaml).
+- [Compose unificado (dataset + entrenamiento + API CPU + API de pruebas)](../docker-compose.yaml) y [Compose entrenamiento por terminal](../utilidades-entrenamiento/docker-compose.yaml).
 - [Configuración de entrenamiento](../utilidades-entrenamiento/configs/default.yaml) y [fuentes](../utilidades-entrenamiento/modelo-general-destilacion/sources.json).
 - [Validador documental](validar_documentacion.py): ejecutar `python3 docs/validar_documentacion.py` desde la raíz. Comprueba enlaces locales, anclas y cobertura del índice, sin red ni escrituras.
 

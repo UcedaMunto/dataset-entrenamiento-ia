@@ -38,3 +38,7 @@ venv/
 
 # Respaldos locales del dataset
 /respaldos/
+
+# Resultados locales de la API de pruebas (DSR).
+/tests/resultados/*
+!/tests/resultados/.gitkeep

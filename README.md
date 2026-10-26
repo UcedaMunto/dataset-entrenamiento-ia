@@ -8,19 +8,20 @@ Sistema Docker para construir un dataset de prendas, entrenar MobileNetV3-Small 
 - [Referencia de endpoints](docs/API.md).
 - [Instalación sin Docker](docs/INSTALACION-NATIVA.md) · [Manual DOCX APA 7](docs/Instalacion_nativa_API_prendas_APA7.docx).
 
-## Las tres interfaces
+## Las interfaces
 
 | Interfaz | Dirección local | Función | Implementación |
 |---|---|---|---|
 | Dataset | http://127.0.0.1:8787/ | Importación, anotación asistida, galería y duplicados | `modelo-general-destilacion/dashboard.py` |
 | Entrenamiento | http://127.0.0.1:8090/ | Iniciar/detener, continuar checkpoints, métricas, evaluación e inferencia CPU | `monitor.py` |
 | API CPU independiente | http://127.0.0.1:8081/docs | Inferencia de una imagen; contrato OpenAPI | `inference_api.py` |
+| API de pruebas (DSR) | http://127.0.0.1:8082/docs | Ejecuta la prueba de la API sobre `tests/imagenes-test/` | `test_api.py` |
 
-Las rutas del código de esta tabla son relativas a `utilidades-entrenamiento/`. El servicio `train` es de línea de comandos; el panel es el servicio `monitor`. Las interfaces comparten archivos y SQLite a través de montajes Docker, sin necesitar llamarse entre sí.
+Las rutas del código de esta tabla son relativas a `utilidades-entrenamiento/`. El servicio `train` es de línea de comandos; el panel es el servicio `monitor`. Las interfaces comparten archivos y SQLite a través de montajes Docker, sin necesitar llamarse entre sí. La API de pruebas usa el conjunto portable [`tests/imagenes-test/`](tests/imagenes-test/) y no requiere el dataset completo; su diseño está en [`docs/DSR-PRUEBA-API.md`](docs/DSR-PRUEBA-API.md).
 
 ## Arranque
 
-Las tres interfaces (panel de dataset, panel de entrenamiento y API CPU) se levantan con el Compose unificado de la raíz. Prepara una sola vez la configuración del panel de dataset si aún no existe:
+Las interfaces (panel de dataset, panel de entrenamiento, API CPU y API de pruebas) se levantan con el Compose unificado de la raíz. Prepara una sola vez la configuración del panel de dataset si aún no existe:
 
 ```bash
 [ -f utilidades-entrenamiento/modelo-general-destilacion/.env ] || cp utilidades-entrenamiento/modelo-general-destilacion/.env.example utilidades-entrenamiento/modelo-general-destilacion/.env
@@ -33,7 +34,7 @@ Después, desde la raíz del proyecto:
 docker compose up -d --build
 ```
 
-Esto levanta las tres interfaces: panel de dataset en `http://127.0.0.1:8787/`, panel de entrenamiento en `http://127.0.0.1:8090/` y API CPU en `http://127.0.0.1:8081/docs`. Para detenerlas: `docker compose down`. El checkpoint de la API se puede cambiar definiendo `MODEL_CHECKPOINT` (ruta absoluta) antes de levantar.
+Esto levanta las interfaces: panel de dataset en `http://127.0.0.1:8787/`, panel de entrenamiento en `http://127.0.0.1:8090/`, API CPU en `http://127.0.0.1:8081/docs` y API de pruebas en `http://127.0.0.1:8082/docs`. Para detenerlas: `docker compose down`. El checkpoint de la API se puede cambiar definiendo `MODEL_CHECKPOINT` (ruta absoluta) antes de levantar.
 
 El entrenamiento por terminal se mantiene en el Compose de entrenamiento:
 
@@ -63,6 +64,8 @@ La base tiene registros huérfanos en la gestión de duplicados y archivos ausen
 | Operar curación y proveedores | [Guía de curación](utilidades-entrenamiento/modelo-general-destilacion/README.md) |
 | Entrenar, continuar o desplegar inferencia | [Guía de entrenamiento](utilidades-entrenamiento/README.md) |
 | Iniciar entrenamiento por terminal | [Inicio rápido](utilidades-entrenamiento/INICIO-RAPIDO.md) |
+| Ejecutar la prueba de la API | [README-TEST](README-TEST.md) |
+| Ver cómo se hizo la prueba | [README-PRUEBA](README-PRUEBA.md) |
 | Interpretar métricas | [Evaluación](EVALUACION-ENTRENAMIENTO.md) |
 | Localizar cualquier documento | [Índice](docs/INDICE.md) |
 

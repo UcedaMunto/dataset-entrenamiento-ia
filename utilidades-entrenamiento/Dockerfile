@@ -10,7 +10,7 @@ WORKDIR /app
 COPY requirements.txt /app/requirements.txt
 RUN python -m pip install --no-cache-dir -r /app/requirements.txt
 
-COPY entrypoint.sh train.py predict.py monitor.py inference_api.py evaluate_properties.py /app/
+COPY entrypoint.sh train.py predict.py monitor.py inference_api.py evaluate_properties.py test_api.py /app/
 COPY configs/ /app/configs/
 COPY tests/ /app/tests/
 RUN chmod +x /app/entrypoint.sh
