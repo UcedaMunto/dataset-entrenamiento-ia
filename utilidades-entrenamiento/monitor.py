@@ -14,9 +14,10 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 MODEL_DIR = Path("/app/modelo-ia")
+CONFIG_DIR = Path("/app/configs")
+DEFAULT_CONFIG_NAME = "default.yaml"
 RUN_ID = re.compile(r"^\d{8}-\d{6}$")
 LOG_PATH = MODEL_DIR / "entrenamiento.log"
-TRAIN_COMMAND = [sys.executable, "/app/train.py", "--config", "/app/configs/default.yaml"]
 _lock = threading.Lock()
 _process: subprocess.Popen | None = None
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
@@ -46,11 +47,12 @@ table,div[style]{break-inside:avoid}@page{margin:12mm}}
 <h1>Entrenamiento de prendas</h1>
 <div class="card"><button id="start">Nuevo entrenamiento</button>
 <button id="continue">Continuar desde mejor checkpoint</button>
+<label>Configuración <select id="tconfig"></select></label>
 <label>Estrategia <select id="strategy">
 <option value="fine_tune">Ajuste fino completo (recomendado)</option>
 <option value="heads_only">Solo entrenar las cabezas</option>
 </select></label>
-<p class="muted">Continuar crea una nueva ejecución desde el mejor checkpoint de la ejecución seleccionada. Se reinician optimizador y scheduler; no es una reanudación exacta.</p>
+<p class="muted">Continuar crea una nueva ejecución desde el mejor checkpoint de la ejecución seleccionada. Se reinician optimizador y scheduler; no es una reanudación exacta. Para entrenar desde cero con la receta recomendada, elige la configuración <code>desde-cero.yaml</code>.</p>
 <button id="stop" disabled>Detener</button> <span id="tstate" class="muted"></span>
 <pre id="log" class="muted" style="max-height:10rem;overflow:auto;margin:.5rem 0 0"></pre></div>
 <div class="card"><button id="try">Probar modelo en CPU</button>
@@ -212,8 +214,8 @@ $('ego').onclick=async()=>{const q='run='+encodeURIComponent($('erun').value)+'&
  const r=await fetch('/api/eval?'+q,{method:'POST',headers:{'X-Requested-With':'monitor'}});
  if(!r.ok){alert((await r.json()).error||'Error');return}
  $('estate').textContent='Iniciando…';epoll=setInterval(eload,2000)};
-$('start').onclick=async()=>{pick=true;await post('/api/start')};
-$('continue').onclick=()=>post('/api/continue?run='+encodeURIComponent($('run').value)+'&strategy='+encodeURIComponent($('strategy').value));
+$('start').onclick=async()=>{pick=true;await post('/api/start?config='+encodeURIComponent($('tconfig').value))};
+$('continue').onclick=()=>post('/api/continue?run='+encodeURIComponent($('run').value)+'&strategy='+encodeURIComponent($('strategy').value)+'&config='+encodeURIComponent($('tconfig').value));
 $('stop').onclick=()=>post('/api/stop');
 $('dsr').onclick=async()=>{const s=$('dsrstate'),o=$('dsrout');s.textContent='Ejecutando prueba DSR (1.424 imágenes, ~15 s)…';o.replaceChildren();
  try{const r=await fetch('http://127.0.0.1:8082/test/run',{method:'POST'});
@@ -225,7 +227,10 @@ $('dsr').onclick=async()=>{const s=$('dsrstate'),o=$('dsrout');s.textContent='Ej
    ['Promedio macro',m.porcentaje+'%'],['Criterio R11 (≥70%)',m.porcentaje>=70?'Cumple':'No cumple']]));
   const p=document.createElement('p');p.className='muted';p.textContent='Reporte guardado en '+d.resultado_guardado+' (run_id '+d.run_id+').';o.append(p);
  }catch(e){s.textContent='No se pudo conectar con la API de pruebas (http://127.0.0.1:8082): '+e}}
-(async()=>{await status();await runs();await refresh();$('run').onchange=refresh;setInterval(async()=>{await status();await runs();refresh()},3000)})();
+async function loadConfigs(){const l=await j('/api/configs');const s=$('tconfig');
+ s.replaceChildren(...l.map(n=>{const o=document.createElement('option');o.value=o.textContent=n;return o}));
+ if(!l.includes(s.value))s.value='default.yaml'}
+(async()=>{await loadConfigs();await status();await runs();await refresh();$('run').onchange=refresh;setInterval(async()=>{await status();await runs();refresh()},3000)})();
 </script></body></html>"""
 
 
@@ -459,17 +464,32 @@ def list_models() -> list[dict]:
     return models
 
 
-def continuation_command(run_id: str, strategy: str, model_dir: Path = MODEL_DIR) -> list[str]:
+def train_command(config_name: str | None = None) -> list[str]:
+    name = config_name or DEFAULT_CONFIG_NAME
+    if not re.fullmatch(r"[\w.-]+\.yaml", name):
+        raise ValueError("Nombre de configuración no válido.")
+    if not (CONFIG_DIR / name).is_file():
+        raise FileNotFoundError(f"No existe la configuración {name}.")
+    return [sys.executable, "/app/train.py", "--config", str(CONFIG_DIR / name)]
+
+
+def list_configs() -> list[str]:
+    return sorted(path.name for path in CONFIG_DIR.glob("*.yaml"))
+
+
+def continuation_command(
+    run_id: str,
+    strategy: str,
+    model_dir: Path = MODEL_DIR,
+    config_name: str | None = None,
+) -> list[str]:
     if not re.fullmatch(r"\d{8}-\d{6}", run_id):
         raise ValueError("El ID de ejecución de origen no es válido.")
     if strategy not in ("fine_tune", "heads_only"):
         raise ValueError("La estrategia de continuación no es válida.")
     if not (model_dir / "runs" / run_id / "best.pt").is_file():
         raise FileNotFoundError(f"La ejecución {run_id} no tiene un mejor checkpoint para continuar.")
-    return [
-        sys.executable, "/app/train.py", "--config", "/app/configs/default.yaml",
-        "--continue-from", run_id, "--strategy", strategy,
-    ]
+    return train_command(config_name) + ["--continue-from", run_id, "--strategy", strategy]
 
 
 def process_status() -> dict:
@@ -487,12 +507,16 @@ def process_status() -> dict:
 def start_training(
     run_id: str | None = None,
     strategy: str | None = None,
+    config_name: str | None = None,
 ) -> tuple[int, dict]:
     global _process
-    command = TRAIN_COMMAND
+    try:
+        command = train_command(config_name)
+    except (ValueError, FileNotFoundError) as error:
+        return 400, {"error": str(error)}
     if run_id is not None:
         try:
-            command = continuation_command(run_id, strategy or "", MODEL_DIR)
+            command = continuation_command(run_id, strategy or "", MODEL_DIR, config_name)
         except ValueError as error:
             return 400, {"error": str(error)}
         except FileNotFoundError as error:
@@ -543,6 +567,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, json.dumps(process_status()).encode(), "application/json")
         elif self.path == "/api/runs":
             self._send(200, json.dumps(list_runs()).encode(), "application/json")
+        elif self.path == "/api/configs":
+            self._send(200, json.dumps(list_configs()).encode(), "application/json")
         elif self.path.startswith("/api/run/") and RUN_ID.match(self.path[9:]):
             run_id = self.path[9:]
             run_dir = MODEL_DIR / "runs" / run_id
@@ -570,12 +596,14 @@ class Handler(BaseHTTPRequestHandler):
             status, body = start_evaluation(query.get("run", [""])[0], query.get("split", [""])[0])
             self._send(status, json.dumps(body).encode(), "application/json")
         elif self.path == "/api/start":
-            status, body = start_training()
+            query = parse_qs(urlsplit(self.path).query)
+            status, body = start_training(config_name=query.get("config", [None])[0])
             self._send(status, json.dumps(body).encode(), "application/json")
         elif urlsplit(self.path).path == "/api/continue":
             query = parse_qs(urlsplit(self.path).query)
             status, body = start_training(
-                query.get("run", [""])[0], query.get("strategy", [""])[0]
+                query.get("run", [""])[0], query.get("strategy", [""])[0],
+                query.get("config", [None])[0],
             )
             self._send(status, json.dumps(body).encode(), "application/json")
         elif self.path == "/api/stop":

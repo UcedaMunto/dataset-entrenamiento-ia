@@ -15,14 +15,15 @@ Implementación: [`monitor.py`](../utilidades-entrenamiento/monitor.py). Los POS
 | GET | `/api/runs` | Identificadores de ejecuciones |
 | GET | `/api/run/{run_id}` | Configuración, métricas, progreso, test y conteos de imágenes |
 | GET | `/api/models` | Ejecuciones con checkpoint disponible |
+| GET | `/api/configs` | Configuraciones YAML disponibles en `/app/configs/` |
 | GET | `/api/eval?run={run_id}&split={split}` | Estado y resultado guardado de evaluación |
-| POST | `/api/start` | Iniciar entrenamiento con configuración del contenedor |
-| POST | `/api/continue?run={run_id}&strategy={strategy}` | Crear fase desde `best.pt`; `fine_tune` o `heads_only` |
+| POST | `/api/start?config={nombre}` | Iniciar entrenamiento con la configuración elegida (`default.yaml` por defecto) |
+| POST | `/api/continue?run={run_id}&strategy={strategy}&config={nombre}` | Crear fase desde `best.pt`; `fine_tune` o `heads_only` |
 | POST | `/api/stop` | Detener el proceso de entrenamiento gestionado |
 | POST | `/api/predict?run={run_id}` | Bytes de una imagen en el cuerpo, máximo 10 MB según mensaje del monitor |
 | POST | `/api/eval?run={run_id}&split={split}` | Iniciar evaluación; split `train`, `val` o `test` |
 
-Los IDs de ejecución se validan y deben referir a los artefactos locales. La predicción del monitor recibe bytes, no el multipart de una imagen de la API independiente. Un entrenamiento iniciado fuera del monitor no queda bajo su control de procesos.
+Los IDs de ejecución se validan y deben referir a los artefactos locales. El parámetro `config` acepta nombres de `*.yaml` dentro de `/app/configs/` (por ejemplo `desde-cero.yaml`); los valores fuera de ese patrón se rechazan. La predicción del monitor recibe bytes, no el multipart de una imagen de la API independiente. Un entrenamiento iniciado fuera del monitor no queda bajo su control de procesos.
 
 Ejemplo de consulta sin iniciar trabajos:
 
