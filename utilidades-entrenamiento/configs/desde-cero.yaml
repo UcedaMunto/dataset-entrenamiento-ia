@@ -1,0 +1,34 @@
+# Configuración recomendada para entrenar MobileNetV3-Small DESDE CERO.
+# Basada en las ejecuciones exitosas del 19/10 y 28/10 y en el análisis de
+# degradación del 28/10/2026 (Analisis_Degradacion_Entrenamiento_MobileNetV3_DSR.md).
+#
+# A diferencia de configs/default.yaml (lr 0.001 y warmup_epochs 3, que produjo
+# la caída del 26/10), aquí se usa el ajuste fino completo desde la primera época
+# con tasas de aprendizaje bajas y parada temprana.
+dataset_root: /app/dataset
+database: /app/dataset/metadata.sqlite
+model_dir: /app/modelo-ia/runs
+
+# 224 px es la resolución nativa de los pesos ImageNet de MobileNetV3-Small.
+image_size: 224
+batch_size: 64
+epochs: 15
+learning_rate: 0.0001
+num_workers: 8
+pretrained: true
+seed: 42
+multilabel_threshold: 0.5
+
+# Ajuste fino completo desde el inicio (backbone descongelado en la época 1).
+finetune: true
+warmup_epochs: 0
+finetune_lr: 0.00001
+weight_decay: 0.0001
+augment: true
+class_weighted: true
+label_smoothing: 0.05
+amp: true
+early_stopping_patience: 5
+
+# Registro de imágenes usadas por ejecución (SQLite aparte; el dataset es de solo lectura).
+ledger: /app/modelo-ia/registro_entrenamiento.sqlite
