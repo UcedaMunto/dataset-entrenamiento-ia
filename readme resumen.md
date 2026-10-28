@@ -7,17 +7,18 @@ Documento dividido en cuatro bloques con saltos sugeridos para impresión; la pa
 
 El proyecto implementa un sistema de visión artificial para reconocer el tipo, los colores y los estilos de una prenda a partir de fotografías. Su flujo comprende la preparación del dataset, la anotación asistida, la aprobación de muestras, el entrenamiento supervisado, la evaluación y la inferencia. Funciona con Docker Compose y utiliza SQLite para metadatos; no necesita un servidor de base de datos ni Kubernetes para operar localmente.
 
-Las dos interfaces tienen responsabilidades complementarias:
+Las interfaces tienen responsabilidades complementarias:
 
 | Dirección | Responsabilidad | Servicio |
 |---|---|---|
 | `http://127.0.0.1:8787/` | Construir y curar el dataset; ver galería y resolver duplicados | `dashboard` |
 | `http://127.0.0.1:8090/` | Gestionar entrenamiento, consultar métricas y probar checkpoints | `monitor` |
 | `http://127.0.0.1:8081/docs` | Consultar y probar el contrato de inferencia CPU independiente | `inference-api` |
+| `http://127.0.0.1:8082/docs` | Ejecutar la prueba DSR de la API sobre el test portable | `test-api` |
 
 El panel de dataset está en `utilidades-entrenamiento/modelo-general-destilacion/`. El de entrenamiento está en `utilidades-entrenamiento/`. Se comunican mediante el dataset montado en Docker: el curador escribe imágenes y SQLite, y el entrenador los lee en solo lectura. Los pesos y resultados se guardan por separado en `modelo-ia/`; el modelo recomendado se conserva en `modelos-compartidos/`.
 
-Para iniciar las tres interfaces (panel de dataset, panel de entrenamiento y API CPU) desde la raíz, preparar una sola vez el `.env` de curación y levantar el Compose unificado:
+Para iniciar las interfaces (panel de dataset, panel de entrenamiento, API CPU y API de pruebas) desde la raíz, preparar una sola vez el `.env` de curación y levantar el Compose unificado:
 
 ```bash
 [ -f utilidades-entrenamiento/modelo-general-destilacion/.env ] || cp utilidades-entrenamiento/modelo-general-destilacion/.env.example utilidades-entrenamiento/modelo-general-destilacion/.env
@@ -25,7 +26,7 @@ chmod 600 utilidades-entrenamiento/modelo-general-destilacion/.env
 docker compose up -d --build
 ```
 
-Esto deja el panel de dataset en `http://127.0.0.1:8787/`, el panel de entrenamiento en `http://127.0.0.1:8090/` y la API CPU en `http://127.0.0.1:8081/docs`. Las claves se mantienen locales; el panel de dataset usa red del host y escucha solo en localhost, y la API y el monitor publican sus puertos también en localhost. En una máquina remota se accede con un túnel SSH. El checkpoint de la API se puede cambiar con `MODEL_CHECKPOINT` (ruta absoluta).
+Esto deja el panel de dataset en `http://127.0.0.1:8787/`, el panel de entrenamiento en `http://127.0.0.1:8090/`, la API CPU en `http://127.0.0.1:8081/docs` y la API de pruebas en `http://127.0.0.1:8082/docs`. Las claves se mantienen locales; el panel de dataset usa red del host y escucha solo en localhost, y las API y el monitor publican sus puertos también en localhost. En una máquina remota se accede con un túnel SSH. El checkpoint de la API se puede cambiar con `MODEL_CHECKPOINT` (ruta absoluta).
 
 El entrenamiento por terminal se mantiene en el Compose de entrenamiento:
 
@@ -113,6 +114,6 @@ La API publica `GET /health` y `POST /v1/predict`, además de documentación Fas
 
 En la revisión respondieron con HTTP 200 las dos páginas principales, la lista de modelos, el resumen de curación, la galería y los grupos duplicados; `/health` informó CPU disponible. Las comprobaciones HTTP fueron de consulta. Las operaciones de escritura se contrastaron con el código y las pruebas, sin lanzar lotes remotos ni modificar el dataset.
 
-SQLite pasó `quick_check`, pero `foreign_key_check` encontró **15.066 referencias huérfanas** de miembros a grupos de duplicados. Hay **9.939 rutas de imagen sin archivo**, todas de prendas rechazadas, compatibles con el flujo de purga documentado; no se verificó individualmente su causa histórica. No faltan archivos del subconjunto aprobado. Estas observaciones deben resolverse o justificarse antes de declarar íntegra toda la base; no equivalen a que fallen las dos interfaces.
+SQLite pasó `quick_check`, pero `foreign_key_check` encontró **15.066 referencias huérfanas** de miembros a grupos de duplicados. Hay **9.939 rutas de imagen sin archivo**, todas de prendas rechazadas, compatibles con el flujo de purga documentado; no se verificó individualmente su causa histórica. No faltan archivos del subconjunto aprobado. Estas observaciones deben resolverse o justificarse antes de declarar íntegra toda la base; no equivalen a que fallen las interfaces.
 
 La documentación queda organizada mediante un README de entrada, un índice completo, guías operativas, referencia de endpoints, evaluación y registro de validación. Los planes anteriores se conservan como antecedentes. Los próximos pasos son sanear las relaciones de duplicados con respaldo, establecer una referencia humana independiente, controlar similitudes entre splits y medir el rendimiento en el entorno final. [Consultar evidencia y verificaciones](docs/VALIDACION.md).
