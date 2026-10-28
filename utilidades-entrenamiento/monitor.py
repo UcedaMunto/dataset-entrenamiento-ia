@@ -595,7 +595,7 @@ class Handler(BaseHTTPRequestHandler):
             query = parse_qs(urlsplit(self.path).query)
             status, body = start_evaluation(query.get("run", [""])[0], query.get("split", [""])[0])
             self._send(status, json.dumps(body).encode(), "application/json")
-        elif self.path == "/api/start":
+        elif urlsplit(self.path).path == "/api/start":
             query = parse_qs(urlsplit(self.path).query)
             status, body = start_training(config_name=query.get("config", [None])[0])
             self._send(status, json.dumps(body).encode(), "application/json")
