@@ -41,6 +41,17 @@ RESULTS_DIR = Path(os.environ.get("TEST_RESULTS_DIR", str(DEFAULT_RESULTS_DIR)))
 DEFAULT_DESIGN_DOC = Path(__file__).resolve().parents[1] / "docs" / "DSR-PRUEBA-API.md"
 DESIGN_DOC_PATH = Path(os.environ.get("TEST_DESIGN_DOC", str(DEFAULT_DESIGN_DOC)))
 
+API_VERSION = "1.1.0"
+R11_THRESHOLD_PCT = 70.0
+TRAIN_IMAGES_DECLARED = int(os.environ.get("TRAIN_IMAGES_DECLARED", "11616"))
+REFERENCE_RESULT = {
+    "tipo_prenda_pct": 94.94,
+    "color_jaccard_pct": 68.42,
+    "estilo_jaccard_pct": 69.21,
+    "promedio_macro_pct": 77.52,
+    "criterio_R11_cumple": True,
+}
+
 RUN_LOCK = threading.Lock()
 model = None
 checkpoint = None
@@ -98,6 +109,112 @@ def binarize(labels, classes: list[str]) -> torch.Tensor:
     return torch.tensor([value in label_set for value in classes], dtype=torch.bool)
 
 
+def checkpoint_sha256() -> str:
+    return hashlib.sha256(CHECKPOINT_PATH.read_bytes()).hexdigest()
+
+
+def manifest_sha256() -> str:
+    return hashlib.sha256(MANIFEST_PATH.read_bytes()).hexdigest()
+
+
+def manifest_summary() -> dict:
+    classes = manifest["classes"]
+    counts_by_type = {value: 0 for value in classes["tipo_prenda"]}
+    no_color = 0
+    no_style = 0
+    for entry in manifest["imagenes"]:
+        counts_by_type[entry["tipo_prenda"]] = counts_by_type.get(entry["tipo_prenda"], 0) + 1
+        if not entry.get("colores"):
+            no_color += 1
+        if not entry.get("estilos"):
+            no_style += 1
+    return {
+        "ruta": str(MANIFEST_PATH),
+        "sha256": manifest_sha256(),
+        "descripcion": manifest.get("descripcion"),
+        "generado": manifest.get("generado"),
+        "origen": manifest.get("origen"),
+        "total_imagenes": len(manifest["imagenes"]),
+        "umbral_multietiqueta": manifest.get("umbral_multietiqueta"),
+        "image_size": manifest.get("image_size"),
+        "classes": classes,
+        "imagenes_por_tipo": counts_by_type,
+        "imagenes_sin_color": no_color,
+        "imagenes_sin_estilo": no_style,
+    }
+
+
+def checkpoint_info() -> dict:
+    return {
+        "ruta": str(CHECKPOINT_PATH),
+        "sha256": checkpoint_sha256(),
+        "arquitectura": checkpoint.get("architecture") if checkpoint else None,
+        "epoca": checkpoint.get("epoch") if checkpoint else None,
+        "image_size": checkpoint.get("image_size") if checkpoint else None,
+        "umbral_multietiqueta": checkpoint.get("multilabel_threshold") if checkpoint else None,
+        "validacion_checkpoint": checkpoint.get("validation") if checkpoint else None,
+        "imagenes_entrenamiento_declaradas": TRAIN_IMAGES_DECLARED,
+        "nota_imagenes_entrenamiento": (
+            "Valor declarado en EVALUACION-ENTRENAMIENTO.md para el checkpoint compartido; "
+            "no se deriva del archivo de pesos."
+        ),
+    }
+
+
+def operational_definitions() -> dict:
+    return {
+        "exactitud_tipo": "Exactitud de tipo = (tipos correctos / T) · 100, con T el total de imágenes de prueba.",
+        "jaccard_color_estilo": (
+            "Jaccard promedio por imagen = (1/T) · Σ |P_i ∩ R_i| / |P_i ∪ R_i|, para color y estilo; "
+            "si ambos conjuntos están vacíos vale 1."
+        ),
+        "promedio_macro": (
+            "Media aritmética sin ponderar de exactitud de tipo, Jaccard de color y Jaccard de estilo; "
+            "cada propiedad pesa 1/3."
+        ),
+        "delta_macro": "Δmacro = macro(checkpoint final) − macro(checkpoint inicial), expresado en puntos porcentuales.",
+        "criterio_R11": f"promedio macro ≥ {R11_THRESHOLD_PCT:.0f} %.",
+    }
+
+
+def dsr_correspondence() -> dict:
+    return {
+        "1_identificacion_del_problema": (
+            "Medir si la API de descripción de prendas reconoce tipo, color y estilo en imágenes no vistas, "
+            "y reproducir la prueba en el equipo de producción."
+        ),
+        "2_objetivos": (
+            "Obtener exactitud de tipo, Jaccard de color y estilo, y promedio macro; contrastar con el requisito R11."
+        ),
+        "3_diseno_y_desarrollo": (
+            "API de pruebas test-api + conjunto portable tests/imagenes-test/ con manifest de etiquetas y SHA-256."
+        ),
+        "4_demostracion": "POST /test/run sobre las 1.424 imágenes; reporte JSON por ejecución.",
+        "5_evaluacion": "Cálculo de las cuatro métricas y verificación del criterio R11 por checkpoint.",
+        "6_comunicacion": (
+            "Resultados en este JSON y en tests/resultados/reporte_*.json, para el informe y el Anexo G."
+        ),
+    }
+
+
+def control_conditions() -> dict:
+    return {
+        "variables_constantes": [
+            "1.424 imágenes de test (manifest.json con SHA-256 por imagen)",
+            "Etiquetas de referencia generadas por NVIDIA NIM y DeepSeek",
+            "Preprocesamiento (resize 224 y normalización ImageNet)",
+            "Vocabulario de clases del checkpoint (tipo, color, estilo)",
+            "Umbral multietiqueta 0.5",
+            "Script de evaluación test_api.py",
+            "Dispositivo de ejecución (CPU por defecto)",
+        ],
+        "variables_que_cambian": [
+            "Checkpoint/época evaluada (C1 inicial, C2 intermedia opcional, C3 final)",
+            "Número de imágenes de entrenamiento si la ejecución de entrenamiento difiere (factor adicional a declarar)",
+        ],
+    }
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     global model, checkpoint, transform, manifest
@@ -111,7 +228,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(
     title="API de pruebas (DSR) de reconocimiento de prendas",
-    version="1.0.0",
+    version=API_VERSION,
     description=(
         "Ejecuta la prueba de la API de descripción de prendas definida en "
         "docs/DSR-PRUEBA-API.md sobre el conjunto portable tests/imagenes-test/."
@@ -184,21 +301,33 @@ def run_evaluation(device_name: str = "cpu", max_images: Optional[int] = None) -
     type_summary = summarize_types(type_confusion, classes["tipo_prenda"])
     color_summary = summarize_multilabel(color_pred, color_real, classes["color"])
     style_summary = summarize_multilabel(style_pred, style_real, classes["estilo"])
+    macro = macro_property_average(
+        type_summary["accuracy_pct"],
+        color_summary["coincidencia_parcial_jaccard_pct"],
+        style_summary["coincidencia_parcial_jaccard_pct"],
+    )
     return {
         "generado": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "software_version": f"test-api {API_VERSION}",
         "checkpoint": str(CHECKPOINT_PATH),
+        "checkpoint_sha256": checkpoint_sha256(),
+        "checkpoint_arquitectura": checkpoint.get("architecture"),
         "epoca_checkpoint": checkpoint.get("epoch"),
+        "validacion_checkpoint": checkpoint.get("validation"),
+        "imagenes_entrenamiento_declaradas": TRAIN_IMAGES_DECLARED,
         "device": device_name,
         "imagenes_evaluadas": len(entries) - len(errors),
         "imagenes_total_manifest": len(manifest["imagenes"]),
         "imagenes_con_error": errors,
         "umbral_multietiqueta": threshold,
-        "sha256_manifest": hashlib.sha256(MANIFEST_PATH.read_bytes()).hexdigest(),
-        "promedio_macro_propiedades": macro_property_average(
-            type_summary["accuracy_pct"],
-            color_summary["coincidencia_parcial_jaccard_pct"],
-            style_summary["coincidencia_parcial_jaccard_pct"],
-        ),
+        "sha256_manifest": manifest_sha256(),
+        "promedio_macro_propiedades": macro,
+        "criterio_R11": {
+            "umbral_pct": R11_THRESHOLD_PCT,
+            "promedio_macro_pct": macro["porcentaje"],
+            "cumple": macro["porcentaje"] >= R11_THRESHOLD_PCT,
+        },
+        "manifest_resumen": manifest_summary(),
         "tipo_prenda": type_summary,
         "color": color_summary,
         "estilo": style_summary,
@@ -242,6 +371,43 @@ def design_summary() -> dict:
     }
 
 
+def saved_reports() -> list[dict]:
+    if not RESULTS_DIR.is_dir():
+        return []
+    reports = []
+    for path in sorted(RESULTS_DIR.glob("reporte_*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        data.setdefault("run_id", path.stem.removeprefix("reporte_"))
+        data.setdefault("resultado_guardado", str(path))
+        reports.append(data)
+    return reports
+
+
+def comparative_matrix(reports: list[dict]) -> list[dict]:
+    rows = []
+    for report in reports:
+        macro = report.get("promedio_macro_propiedades", {}) or {}
+        rows.append({
+            "run_id": report.get("run_id"),
+            "archivo": report.get("resultado_guardado"),
+            "generado": report.get("generado"),
+            "checkpoint": report.get("checkpoint"),
+            "checkpoint_sha256": report.get("checkpoint_sha256"),
+            "epoca_checkpoint": report.get("epoca_checkpoint"),
+            "imagenes_entrenamiento_declaradas": report.get("imagenes_entrenamiento_declaradas"),
+            "imagenes_evaluadas": report.get("imagenes_evaluadas"),
+            "tipo_prenda_pct": (report.get("tipo_prenda") or {}).get("accuracy_pct"),
+            "color_jaccard_pct": (report.get("color") or {}).get("coincidencia_parcial_jaccard_pct"),
+            "estilo_jaccard_pct": (report.get("estilo") or {}).get("coincidencia_parcial_jaccard_pct"),
+            "promedio_macro_pct": macro.get("porcentaje"),
+            "cumple_R11": macro.get("porcentaje", 0) >= R11_THRESHOLD_PCT,
+        })
+    return rows
+
+
 @app.get("/health")
 def health():
     return {
@@ -272,25 +438,51 @@ def get_design_markdown():
 @app.get("/test/manifest")
 def get_manifest_summary():
     ensure_ready()
-    classes = manifest["classes"]
-    counts_by_type = {value: 0 for value in classes["tipo_prenda"]}
-    no_color = 0
-    no_style = 0
-    for entry in manifest["imagenes"]:
-        counts_by_type[entry["tipo_prenda"]] = counts_by_type.get(entry["tipo_prenda"], 0) + 1
-        if not entry.get("colores"):
-            no_color += 1
-        if not entry.get("estilos"):
-            no_style += 1
+    return manifest_summary()
+
+
+@app.get("/test/informe")
+def get_informe(run_id: Optional[str] = Query(None, description="Reporte guardado a usar; por defecto el más reciente.")):
+    ensure_ready()
+    reports = saved_reports()
+    if run_id:
+        selected = next((r for r in reports if r.get("run_id") == run_id), None)
+        if selected is None:
+            raise HTTPException(status_code=404, detail=f"No existe el reporte {run_id}.")
+    else:
+        selected = reports[0] if reports else None
     return {
-        "ruta": str(MANIFEST_PATH),
-        "total_imagenes": len(manifest["imagenes"]),
-        "umbral_multietiqueta": manifest.get("umbral_multietiqueta"),
-        "image_size": manifest.get("image_size"),
-        "classes": classes,
-        "imagenes_por_tipo": counts_by_type,
-        "imagenes_sin_color": no_color,
-        "imagenes_sin_estilo": no_style,
+        "tipo": "evidencia_informe_anexo_g",
+        "generado": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "metodologia": "Design Science Research Methodology (DSRM)",
+        "correspondencia_dsrm": dsr_correspondence(),
+        "requisito_R11": {
+            "id": "R11",
+            "descripcion": "Reconocimiento de propiedades de prendas con promedio macro ≥ 70 %.",
+            "criterio": f"promedio macro ≥ {R11_THRESHOLD_PCT:.0f} %",
+            "umbral_pct": R11_THRESHOLD_PCT,
+        },
+        "indicadores": {
+            "exactitud_tipo_pct": "Porcentaje de imágenes cuyo tipo predicho coincide con la etiqueta real.",
+            "jaccard_color_pct": "Jaccard promedio por imagen para color.",
+            "jaccard_estilo_pct": "Jaccard promedio por imagen para estilo.",
+            "promedio_macro_pct": "Media simple de tipo, color y estilo (cada propiedad pesa 1/3).",
+        },
+        "condiciones_de_control": control_conditions(),
+        "definiciones_operacionales": operational_definitions(),
+        "conjunto_de_prueba": manifest_summary(),
+        "checkpoint": checkpoint_info(),
+        "resultado_referencia_documentado": REFERENCE_RESULT,
+        "ultimo_resultado": selected,
+        "matriz_comparativa": comparative_matrix(reports),
+        "trazabilidad": {
+            "software_version": f"test-api {API_VERSION}",
+            "device": "cpu",
+            "checkpoint_sha256": checkpoint_sha256(),
+            "manifest_sha256": manifest_sha256(),
+            "resultados_ubicacion": str(RESULTS_DIR),
+            "nota": "Los reportes por ejecución quedan en tests/resultados/reporte_*.json.",
+        },
     }
 
 
@@ -324,9 +516,9 @@ def run_test(
     if output.exists():
         run_id = f"{run_id}-{int(time.time() * 1000) % 1000}"
         output = RESULTS_DIR / f"reporte_{run_id}.json"
-    output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     report["run_id"] = run_id
     report["resultado_guardado"] = str(output)
+    output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return report
 
 

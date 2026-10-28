@@ -32,6 +32,12 @@ Los reportes quedan en `tests/resultados/reporte_*.json` y se listan con:
 curl "http://127.0.0.1:8082/test/results"
 ```
 
+Para obtener en un solo JSON toda la evidencia que requiere el informe y el Anexo G (correspondencia DSRM, R11, condiciones de control, fórmulas, conjunto de prueba, trazabilidad y matriz comparativa):
+
+```bash
+curl "http://127.0.0.1:8082/test/informe"
+```
+
 ## Endpoints principales
 
 | Método | Ruta | Uso |
@@ -40,6 +46,7 @@ curl "http://127.0.0.1:8082/test/results"
 | GET | `/test/design` | Resumen JSON del diseño DSR |
 | GET | `/test/design/markdown` | Diseño DSR en Markdown |
 | GET | `/test/manifest` | Clases y conteos del conjunto de test |
+| GET | `/test/informe` | Evidencia completa para el informe y el Anexo G (DSRM, R11, fórmulas, matriz comparativa) |
 | GET | `/test/images` | Lista paginada de imágenes y etiquetas |
 | POST | `/test/run` | Ejecuta la prueba; `max_images` y `device` opcionales |
 | GET | `/test/results` | Reportes guardados |

@@ -111,6 +111,7 @@ class RunEvaluationTests(unittest.TestCase):
                 patch.object(api, "CHECKPOINT_PATH", Path("/tmp/best.pt")), \
                 patch.object(api, "checkpoint", CHECKPOINT), \
                 patch.object(api, "manifest", self.manifest), \
+                patch.object(api, "checkpoint_sha256", return_value="abc123"), \
                 patch.object(api, "model", FakeModel(fake_outputs())), \
                 patch.object(api, "transform", lambda image: torch.zeros(3, 224, 224)):
             report = api.run_evaluation("cpu", max_images=None)
@@ -149,13 +150,16 @@ class HTTPTests(unittest.TestCase):
         cls.tempdir.cleanup()
 
     def setUp(self):
+        self.results_dir = self.root / "resultados" / self._testMethodName
+        self.results_dir.mkdir(parents=True, exist_ok=True)
         self.patches = (
             patch.object(api, "TEST_IMAGES_ROOT", self.root),
             patch.object(api, "MANIFEST_PATH", self.root / "manifest.json"),
-            patch.object(api, "RESULTS_DIR", self.root / "resultados"),
+            patch.object(api, "RESULTS_DIR", self.results_dir),
             patch.object(api, "CHECKPOINT_PATH", Path("/tmp/best.pt")),
             patch.object(api, "DESIGN_DOC_PATH", self.root / "design.md"),
             patch.object(api, "checkpoint", CHECKPOINT),
+            patch.object(api, "checkpoint_sha256", return_value="abc123"),
             patch.object(api, "model", FakeModel(fake_outputs())),
             patch.object(api, "transform", lambda image: torch.zeros(3, 224, 224)),
             patch.object(api, "manifest", self.manifest),
@@ -204,6 +208,21 @@ class HTTPTests(unittest.TestCase):
         status, saved = self.get_json(f"/test/results/{run_id}")
         self.assertEqual(status, 200)
         self.assertEqual(saved["imagenes_evaluadas"], 3)
+
+    def test_informe_endpoint_combines_annex_data(self):
+        with urllib.request.urlopen(self.url + "/test/run", data=b"", timeout=10) as response:
+            json.load(response)
+        status, body = self.get_json("/test/informe")
+        self.assertEqual(status, 200)
+        self.assertEqual(body["tipo"], "evidencia_informe_anexo_g")
+        self.assertEqual(body["requisito_R11"]["umbral_pct"], 70.0)
+        self.assertEqual(body["metodologia"], "Design Science Research Methodology (DSRM)")
+        self.assertEqual(len(body["correspondencia_dsrm"]), 6)
+        self.assertIn("definiciones_operacionales", body)
+        self.assertIn("condiciones_de_control", body)
+        self.assertIn("conjunto_de_prueba", body)
+        self.assertGreaterEqual(len(body["matriz_comparativa"]), 1)
+        self.assertEqual(body["ultimo_resultado"]["promedio_macro_propiedades"]["porcentaje"], 88.89)
 
     def test_unloaded_model_returns_503(self):
         with patch.object(api, "model", None):

@@ -91,6 +91,7 @@ Implementación: [`test_api.py`](../utilidades-entrenamiento/test_api.py). Ejecu
 | GET | `/test/design` | Resumen JSON del diseño DSR |
 | GET | `/test/design/markdown` | Documento de diseño DSR en Markdown |
 | GET | `/test/manifest` | Resumen del manifest: clases, conteos por tipo, sin color/estilo |
+| GET | `/test/informe?run_id=` | Evidencia completa para el informe y el Anexo G (DSRM, R11, control, fórmulas, matriz comparativa) |
 | GET | `/test/images?page=1&page_size=50` | Lista paginada de imágenes y etiquetas de referencia |
 | POST | `/test/run?max_images=10&device=cpu` | Ejecuta la prueba (completa o limitada) y guarda el reporte |
 | GET | `/test/results` | Reportes guardados con su promedio macro |
