@@ -60,7 +60,8 @@ Las cifras de validación son instantáneas comprobadas; los planes y V1 contien
 | [Plan de entrenamiento (MobileNetV3-Small, V2)](<../PLAN-ENTRENAMIENTO.md>) | Plan histórico: no usar sus cifras como estado actual. |
 | [Reconocimiento de prendas](<../README-v1.md>) | Versión histórica descartada. |
 | [Resumen del método de entrenamiento](<../RESUMEN-METODO-ENTRENAMIENTO.md>) | Método con contexto histórico; estado vigente en el resumen nuevo. |
-| [Terminología y teoría del entrenamiento](<../TEORIA-ENTRENAMIENTO.md>) | Referencia conceptual. |
+| [Terminología y teoría del entrenamiento](<../TEORIA-ENTRENAMIENTO.md>) | Referencia conceptual y glosario rápido. |
+| [Teoría del entrenamiento — resumen completo (≈10 páginas)](<TEORIA-ENTRENAMIENTO-COMPLETO.md>) | Fundamentos, MobileNetV3, transferencia, pérdidas, optimización y métricas del entrenamiento. |
 | [Dudas y decisiones antes de procesar datos](<../utilidades-entrenamiento/modelo-general-destilacion/dudas.md>) | Guía del módulo; atender a fechas de mediciones y decisiones pendientes. |
 
 ## Utilidades auxiliares
