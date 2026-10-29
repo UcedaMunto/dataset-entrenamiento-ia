@@ -64,6 +64,7 @@ Las cifras de validación son instantáneas comprobadas; los planes y V1 contien
 | [Teoría del entrenamiento — resumen completo (≈10 páginas)](<TEORIA-ENTRENAMIENTO-COMPLETO.md>) | Fundamentos, MobileNetV3, transferencia, pérdidas, optimización y métricas del entrenamiento. |
 | [Teoría y conceptos del método de evaluación](<TEORIA-METODO-EVALUACION.md>) | DSRM, matriz de confusión, exactitud, precisión/recall/F1, Jaccard, promedio macro, control y validez. |
 | [Registro DSR: errores del entrenamiento y correcciones](<DSR-ERRORES-Y-CORRECCIONES.md>) | Errores E1/E2, diagnóstico DSR, correcciones y verificación del nuevo entrenamiento. |
+| [Registro de entrenamiento 20261029-022656](<ENTRENAMIENTO-20261029-022656.md>) | Configuración, evolución de validación, evaluación en test y decisión de continuidad. |
 | [Dudas y decisiones antes de procesar datos](<../utilidades-entrenamiento/modelo-general-destilacion/dudas.md>) | Guía del módulo; atender a fechas de mediciones y decisiones pendientes. |
 
 ## Utilidades auxiliares
