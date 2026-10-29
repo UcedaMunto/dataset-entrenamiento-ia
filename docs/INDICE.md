@@ -62,6 +62,7 @@ Las cifras de validación son instantáneas comprobadas; los planes y V1 contien
 | [Resumen del método de entrenamiento](<../RESUMEN-METODO-ENTRENAMIENTO.md>) | Método con contexto histórico; estado vigente en el resumen nuevo. |
 | [Terminología y teoría del entrenamiento](<../TEORIA-ENTRENAMIENTO.md>) | Referencia conceptual y glosario rápido. |
 | [Teoría del entrenamiento — resumen completo (≈10 páginas)](<TEORIA-ENTRENAMIENTO-COMPLETO.md>) | Fundamentos, MobileNetV3, transferencia, pérdidas, optimización y métricas del entrenamiento. |
+| [Teoría y conceptos del método de evaluación](<TEORIA-METODO-EVALUACION.md>) | DSRM, matriz de confusión, exactitud, precisión/recall/F1, Jaccard, promedio macro, control y validez. |
 | [Dudas y decisiones antes de procesar datos](<../utilidades-entrenamiento/modelo-general-destilacion/dudas.md>) | Guía del módulo; atender a fechas de mediciones y decisiones pendientes. |
 
 ## Utilidades auxiliares
