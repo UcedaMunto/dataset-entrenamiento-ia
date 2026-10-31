@@ -1,0 +1,4 @@
+run_id,rol,tipo_pct,color_jaccard_pct,estilo_jaccard_pct,macro_pct,r11
+20261026-021300,Referencia,94.94,68.42,69.21,77.52,Cumple
+20261028-042931,Fallido,89.4,33.17,62.79,61.79,No cumple
+20261029-022656,Corregido,94.03,69.28,69.29,77.53,Cumple
