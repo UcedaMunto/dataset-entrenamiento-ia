@@ -12,6 +12,7 @@ Las cifras de validación son instantáneas comprobadas; los planes y V1 contien
 |---|---|
 | [Reconocimiento de prendas — V2](<../README.md>) | Guía del módulo; atender a fechas de mediciones y decisiones pendientes. |
 | [Instalación nativa del modelo entrenado y su API](INSTALACION-NATIVA.md) | Instalación directa con Python; contrato de una imagen; verificación nativa. |
+| [Instalación del sistema completo (Docker)](INSTALACION-DOCKER.md) | Levantar interfaces, API, pruebas, entrenamiento y respaldos con Docker. |
 | [Manual Word APA 7](Instalacion_nativa_API_prendas_APA7.docx) | Documento editable de instalación, configuración y operación sin contenedores. |
 | [Referencia de endpoints locales](<API.md>) | Contratos HTTP de los paneles, la API CPU y la API de pruebas. |
 | [Diseño de prueba DSR — API de descripción de prendas](<DSR-PRUEBA-API.md>) | Prueba de una página basada en Design Science Research. |
