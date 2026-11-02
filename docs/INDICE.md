@@ -26,6 +26,7 @@ Fuera de `docs/` se conservan los README temáticos de cada módulo (dataset, ut
 | Documento | Propósito |
 |---|---|
 | [Reconocimiento de prendas — V2](../README.md) | Portada del repositorio: interfaces, arranque, flujo y estado comprobado. |
+| [Documentación completa unificada](../README-COMPLETO.md) | Todo el contenido de los Markdown del repositorio en un solo archivo ordenado, para dar contexto a otra IA. |
 | [Resumen del proyecto](resumen/RESUMEN-PROYECTO.md) | Resumen ejecutivo de unas cuatro páginas, apto para impresión. |
 | [Índice de documentación](INDICE.md) | Este documento: mapa completo de la documentación. |
 

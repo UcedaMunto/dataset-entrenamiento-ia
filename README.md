@@ -57,6 +57,7 @@ Instrucciones completas en [Instalación Docker](docs/instalacion/INSTALACION-DO
 | Documento | Propósito |
 |---|---|
 | [README (este documento)](README.md) | Documento único de referencia del repositorio. |
+| [Documentación completa unificada](README-COMPLETO.md) | Todo el contenido de los Markdown en un solo archivo ordenado, para dar contexto a otra IA. |
 | [Resumen del proyecto](docs/resumen/RESUMEN-PROYECTO.md) | Resumen ejecutivo de unas cuatro páginas, apto para impresión. |
 | [Índice de documentación](docs/INDICE.md) | Mapa detallado por carpetas temáticas. |
 
