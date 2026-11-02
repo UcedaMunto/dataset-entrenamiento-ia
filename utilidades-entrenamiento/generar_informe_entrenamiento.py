@@ -509,9 +509,14 @@ def build_html(modelo_ia: Path, dataset_sqlite: Path,
 
     # ---- procedencia ----
     provenance = compute_provenance(dataset_sqlite)
+
+    def fmt_n(n) -> str:
+        """Formatea un entero con separador de miles (punto) para el HTML."""
+        return f"{n:,}".replace(",", ".")
+
     provenance_rows = "\n".join(
-        f"<tr><td>{name}</td><td>{version}</td><td>{lic}</td><td>{total}</td>"
-        f"<td>{aprob}</td><td>{rech}</td><td>{otro}</td></tr>"
+        f"<tr><td>{name}</td><td>{version}</td><td>{lic}</td><td>{fmt_n(total)}</td>"
+        f"<td>{fmt_n(aprob)}</td><td>{fmt_n(rech)}</td><td>{fmt_n(otro)}</td></tr>"
         for name, version, lic, total, aprob, rech, otro in provenance
     )
     # Versión CSV (misma información, para el botón de descarga)
