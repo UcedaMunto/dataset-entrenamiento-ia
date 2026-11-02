@@ -1,10 +1,27 @@
 # Instalación del sistema completo (Docker)
 
-Versión: 1.0 · 02 de noviembre de 2026
+Versión: 1.1 · 02 de noviembre de 2026
+
+Guía operativa del **Reconocimiento de prendas V2**, complemento de IA del artefacto principal documentado en el informe del proyecto (nube privada, Kubernetes y VTON Studio). Alineada con la metodología **DSRM** (Peffers et al., 2007).
 
 [Índice completo](INDICE.md) · [Instalación nativa sin Docker de la API](INSTALACION-NATIVA.md) · [Referencia de endpoints](API.md)
 
-## 1. Objetivo y alcance
+## 1. Contexto DSRM y rol de esta guía
+
+El proyecto sigue **Design Science Research Methodology (DSRM)**. El artefacto principal es la nube privada con Kubernetes y el servicio FASHN VTON; **Reconocimiento de prendas V2** es un **complemento útil** que operativiza la inferencia (MobileNetV3-Small) y el entrenamiento del caso de estudio.
+
+Esta guía no documenta el artefacto principal: describe cómo **instanciar y demostrar** el complemento en un equipo Ubuntu con Docker. La correspondencia con las seis actividades DSRM es:
+
+| Actividad DSRM | Dónde se materializa en esta guía |
+|---|---|
+| 1. Identificación del problema | §2 Objetivo y alcance (qué resuelve el sistema) |
+| 2. Objetivos de la solución | §2 Objetivo y alcance (servicios e interfaces) |
+| 3. Diseño y desarrollo | §6 Levantar las interfaces y §9 Entrenamiento (Compose, recetas, checkpoints) |
+| 4. Demostración | §6–8 Levantar y probar los servicios (HTTP 200 e inferencia) |
+| 5. Evaluación | §8 API de pruebas DSR y §10 Informe HTML (métricas y Anexo G) |
+| 6. Comunicación | Documentos referenciados: [API.md](API.md), [DSR-PRUEBA-API.md](DSR-PRUEBA-API.md), informe y Anexo G |
+
+## 2. Objetivo y alcance
 
 Esta guía instala el sistema completo **Reconocimiento de prendas V2** en un equipo con Ubuntu 24.04 y Docker. El sistema incluye:
 
@@ -17,7 +34,7 @@ Esta guía instala el sistema completo **Reconocimiento de prendas V2** en un eq
 
 Todos los servicios se levantan con el **Compose unificado de la raíz** ([docker-compose.yaml](../docker-compose.yaml)). No es necesario Docker para la API de inferencia: existe una [instalación nativa](INSTALACION-NATIVA.md) alternativa.
 
-## 2. Requisitos
+## 3. Requisitos
 
 - Ubuntu 24.04, arquitectura x86-64.
 - Docker Engine 29+ y Docker Compose v2 (`docker compose`).
@@ -34,7 +51,7 @@ docker compose version
 
 Resultado esperado: Docker 29.x y Compose v2.40+.
 
-## 3. Obtener el código
+## 4. Obtener el código
 
 ```bash
 git clone <url-del-repositorio> modelo-reconocimiento-prendas
@@ -43,7 +60,7 @@ cd modelo-reconocimiento-prendas
 
 El repositorio ya incluye el checkpoint compartido (`utilidades-entrenamiento/modelos-compartidos/mobilenetv3-small-best.pt`) y el conjunto portable de test (`tests/imagenes-test/`). El dataset (`dataset/`) se entrega aparte o se reconstruye con el panel.
 
-## 4. Configurar el panel de dataset (una sola vez)
+## 5. Configurar el panel de dataset (una sola vez)
 
 Crear el archivo de entorno desde la plantilla y restringir sus permisos:
 
@@ -64,7 +81,7 @@ Variables principales (los valores son secretos y **no deben versionarse**):
 | `OPENAI_API_KEY`, `OPENAI_MODEL` | Acceso a OpenAI (opcional) |
 | `TRAINING_UID`, `TRAINING_GID` | UID/GID del usuario para los montajes (por defecto 1000) |
 
-## 5. Levantar las interfaces
+## 6. Levantar las interfaces — Diseño y desarrollo → Demostración
 
 Desde la raíz del proyecto:
 
@@ -90,7 +107,7 @@ curl -s -o /dev/null -w "pruebas:  %{http_code}\n" http://127.0.0.1:8082/docs
 
 Resultado esperado: HTTP 200 en las cuatro direcciones. El panel de dataset usa la red del host, por lo que su puerto 8787 no aparece en `docker ps`, pero responde en `127.0.0.1:8787`.
 
-## 6. Probar la API de inferencia
+## 7. Probar la API de inferencia — Demostración
 
 ```bash
 curl -X POST http://127.0.0.1:8081/describir \
@@ -106,7 +123,7 @@ Cambiar el checkpoint cargado por la API (antes de levantar):
 MODEL_CHECKPOINT=/ruta/absoluta/al/checkpoint.pt docker compose up -d inference-api
 ```
 
-## 7. Probar la API de pruebas (DSR)
+## 8. Probar la API de pruebas (DSR) — Evaluación
 
 ```bash
 # Prueba de humo (10 imágenes)
@@ -121,23 +138,23 @@ curl "http://127.0.0.1:8082/test/informe"
 
 Detalle en [DSR-PRUEBA-API.md](DSR-PRUEBA-API.md) y [README-TEST.md](../README-TEST.md).
 
-## 8. Entrenamiento
+## 9. Entrenamiento — Diseño y desarrollo / Demostración
 
-### 8.1 Desde el panel (recomendado)
+### 9.1 Desde el panel (recomendado)
 
 Abrir http://127.0.0.1:8090/ y usar el selector de configuración. Las recetas disponibles están en `utilidades-entrenamiento/configs/`:
 
 - `default.yaml` / `desde-cero.yaml`: entrenamiento independiente desde pesos preentrenados (lr 0,001 / finetune_lr 0,0001, warmup 3, 30 épocas).
 - Recetas de continuación: tasas 1e-4 / 1e-5 y sin warmup, para reanudar un checkpoint.
 
-### 8.2 Desde terminal (Compose de entrenamiento)
+### 9.2 Desde terminal (Compose de entrenamiento)
 
 ```bash
 docker compose -f utilidades-entrenamiento/docker-compose.yaml build train
 docker compose -f utilidades-entrenamiento/docker-compose.yaml run --rm train
 ```
 
-### 8.3 Con GPU (opcional)
+### 9.3 Con GPU (opcional)
 
 ```bash
 docker compose -f utilidades-entrenamiento/docker-compose.yaml --profile gpu run --rm train-gpu
@@ -145,7 +162,7 @@ docker compose -f utilidades-entrenamiento/docker-compose.yaml --profile gpu run
 
 Requiere driver NVIDIA y NVIDIA Container Toolkit. Detalle en la guía de entrenamiento (`utilidades-entrenamiento/README.md`).
 
-## 9. Generar el informe HTML de evaluación
+## 10. Generar el informe HTML de evaluación — Evaluación
 
 ```bash
 python3 utilidades-entrenamiento/generar_informe_entrenamiento.py --output-dir docs/datos-graficos
@@ -168,7 +185,7 @@ docker run --rm --user 1000:1000 \
     --output-dir /app/salida
 ```
 
-## 10. Respaldo y restauración
+## 11. Respaldo y restauración — Evidencias y trazabilidad
 
 Respaldo de los entrenamientos, evaluaciones y base de datos (se guarda en `respaldos/`, ignorado por Git):
 
@@ -185,14 +202,14 @@ Restaurar:
 tar -xzf respaldos/entrenamiento-<marca>.tar.gz
 ```
 
-## 11. Detener el sistema
+## 12. Detener el sistema
 
 ```bash
 docker compose down            # detiene y retira contenedores; conserva datos
 docker compose down --volumes  # además elimina volúmenes (pérdida de datos)
 ```
 
-## 12. Solución de problemas
+## 13. Solución de problemas
 
 | Síntoma | Causa probable | Solución |
 |---|---|---|
