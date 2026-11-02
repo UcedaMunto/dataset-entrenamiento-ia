@@ -42,3 +42,6 @@ venv/
 # Resultados locales de la API de pruebas (DSR).
 /tests/resultados/*
 !/tests/resultados/.gitkeep
+
+# Log generado al construir el informe HTML de entrenamiento.
+/docs/datos-graficos/informe_entrenamiento.log
