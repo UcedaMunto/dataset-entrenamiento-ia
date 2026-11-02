@@ -1,3 +1,53 @@
+# GUÍA VISUAL DE INTERFACES (ANOTADA)
+
+Capturas seccionadas y anotadas de las dos interfaces. Los números en rojo sobre cada imagen corresponden a la leyenda de abajo.
+
+## A. Panel de entrenamiento — http://127.0.0.1:8090/
+
+![Monitor de entrenamiento anotado](docs/capturas/monitor-entrenamiento-anotado.png)
+
+| # | Elemento | Para qué sirve |
+|---|---|---|
+| 1 | Título | Encabezado del panel de entrenamiento. |
+| 2 | Nuevo entrenamiento | Inicia un entrenamiento nuevo con la receta de Configuración seleccionada (`POST /api/start`). |
+| 3 | Continuar desde mejor checkpoint | Crea una ejecución nueva desde el mejor checkpoint de la ejecución elegida; reinicia optimizador y scheduler (`POST /api/continue`). |
+| 4 | Configuración | Receta de entrenamiento: `default.yaml` o `desde-cero.yaml`. |
+| 5 | Estrategia | Cómo continuar desde checkpoint: ajuste fino completo (recomendado) o solo cabezas. |
+| 6 | Detener | Detiene el entrenamiento en curso (`POST /api/stop`). |
+| 7 | Probar modelo en CPU | Abre un diálogo para inferir una imagen con la ejecución elegida (`POST /api/predict`). |
+| 8 | Evaluar precisión por propiedad | Abre el diálogo de evaluación de tipo/color/estilo sobre un split (`POST /api/eval`). |
+| 9 | Ejecutar prueba DSR de la API | Ejecuta la prueba DSR completa (1.424 imágenes) contra la API del puerto 8082. |
+| 10 | Ejecución | Ejecución cuyas métricas y progreso se muestran. |
+| 11 | Progreso | Barra de progreso de la época actual. |
+
+## B. Panel de generación del dataset — http://127.0.0.1:8787/
+
+![Monitor del dataset anotado](docs/capturas/dashboard-dataset-anotado.png)
+
+| # | Elemento | Para qué sirve |
+|---|---|---|
+| 1 | Título | Encabezado del monitor del dataset. |
+| 2 | Galería de prendas | Abre la galería con filtros por categoría y proveedor (`/galeria`). |
+| 3 | Duplicados | Abre la gestión de grupos duplicados (`/duplicados`). |
+| 4 | Editar prompt | Edita el prompt de anotación enviado a los proveedores (`POST /api/prompt`). |
+| 5 | Propiedades IA | Define las propiedades a extraer (`POST /api/properties`). |
+| 6 | API keys | Guarda las claves de los proveedores (`POST /api/credentials`). |
+| 7 | Actualizar | Recarga el resumen: prendas, análisis y resultados (`GET /api/overview`). |
+| 8 | Procesar imágenes ahora | Sección para lanzar importación/anotación. |
+| 9 | Fuente | Fuente de imágenes a procesar (Todas las fuentes, clothing-small, etc.). |
+| 10 | Máximo imágenes | Límite de imágenes nuevas por proveedor. |
+| 11 | Iniciar ejecuciones seleccionadas | Lanza el lote de importación/anotación con los proveedores marcados (`POST /api/ingest`). |
+| 12 | Detener envío | Cancela el lote activo de ese proveedor (`POST /api/stop`). |
+| 13 | Congelar lista / Reanudar | Pausa o reanuda la cola de ese proveedor (solo en pantalla). |
+| 14 | Borrar errores | Limpia los errores registrados de ese proveedor (`POST /api/jobs/clear-errors`). |
+| 15 | Tab Incorporadas | Muestra las prendas incorporadas recientemente. |
+| 16 | Tab Descartadas · NVIDIA NIM | Muestra las descartadas por NVIDIA NIM. |
+| 17 | Tab Descartadas · DeepSeek | Muestra las descartadas por DeepSeek. |
+| 18 | Resultados válidos por modelo | Tabla de respuestas válidas, aptas y descartadas por modelo. |
+| 19 | Prendas por tipo | Resumen de prendas por tipo (incluye pendientes y aprobadas). |
+
+---
+
 ============================================================
 ARCHIVO: README.md
 ============================================================
