@@ -67,6 +67,7 @@ Las cifras de validación son instantáneas comprobadas; los planes y V1 contien
 | [Registro de entrenamiento 20261029-022656](<ENTRENAMIENTO-20261029-022656.md>) | Configuración, evolución de validación, evaluación en test y decisión de continuidad. |
 | [Evidencias de integridad (SHA-256)](<EVIDENCIAS-INTEGRIDAD-SHA256.md>) | Hashes completos de checkpoints, manifest y dataset para reproducibilidad. |
 | [Datos para gráficos del entrenamiento](<datos-graficos/README.md>) | CSV/JSON con métricas por época y resultados del test de los tres entrenamientos. |
+| [Plan de correcciones — Auditoría Anexo G](<PLAN-CORRECCIONES-AUDITORIA-ANEXO-G.md>) | Plan para atender las 20 observaciones y generar los datos necesarios. |
 | [Dudas y decisiones antes de procesar datos](<../utilidades-entrenamiento/modelo-general-destilacion/dudas.md>) | Guía del módulo; atender a fechas de mediciones y decisiones pendientes. |
 
 ## Utilidades auxiliares
