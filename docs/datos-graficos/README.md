@@ -9,6 +9,8 @@ CSV y JSON generados desde los `metrics.json` y las evaluaciones de los tres ent
 | `validacion_por_epoca.csv` | Métricas de validación por época (63 filas = 20 + 15 + 28). |
 | `resultados_test.csv` | Resultados del test portable de 1.424 imágenes por ejecución. |
 | `datos_graficos.json` | Ambas fuentes en un único JSON. |
+| `figuras_entrenamiento_APA7.html` | Informe HTML original con figuras y tablas. |
+| `figuras_entrenamiento_APA7_corregido.html` | Informe HTML corregido según la auditoría del Anexo G (trazabilidad, procedencia, errores por clase, equivalencia y limitaciones). |
 
 ## Columnas de `validacion_por_epoca.csv`
 
