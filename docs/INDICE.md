@@ -44,6 +44,7 @@ Fuera de `docs/` se conservan los README temáticos de cada módulo (dataset, ut
 | Documento | Propósito |
 |---|---|
 | [Referencia de endpoints locales](operacion/API.md) | Contratos HTTP de los paneles, la API CPU y la API de pruebas. |
+| [Guía de interfaces — botones y funciones](operacion/GUIA-INTERFACES.md) | Capturas de pantalla y lista de botones del panel de entrenamiento y del panel de dataset. |
 | [Diseño de prueba DSR — API de descripción de prendas](operacion/DSR-PRUEBA-API.md) | Prueba de una página basada en Design Science Research. |
 | [README-TEST — Ejecutar la prueba](operacion/README-TEST.md) | Guía rápida para correr la prueba con la API. |
 | [README-PRUEBA — Cómo se hizo la prueba](operacion/README-PRUEBA.md) | Detalle de la ejecución y los resultados de la prueba. |
