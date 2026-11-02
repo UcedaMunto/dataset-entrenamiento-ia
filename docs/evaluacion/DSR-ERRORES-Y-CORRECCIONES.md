@@ -1,6 +1,6 @@
 # Registro DSR: errores del entrenamiento y correcciones aplicadas
 
-Documento de trazabilidad del **ciclo de diseño** de Design Science Research Methodology (DSRM) aplicado al clasificador MobileNetV3-Small. Registra los errores cometidos, su diagnóstico, las correcciones implementadas y la verificación del cambio. Complementa la teoría del método de evaluación en [`TEORIA-METODO-EVALUACION.md`](TEORIA-METODO-EVALUACION.md).
+Documento de trazabilidad del **ciclo de diseño** de Design Science Research Methodology (DSRM) aplicado al clasificador MobileNetV3-Small. Registra los errores cometidos, su diagnóstico, las correcciones implementadas y la verificación del cambio. Complementa la teoría del método de evaluación en [`TEORIA-METODO-EVALUACION.md`](../teoria/TEORIA-METODO-EVALUACION.md).
 
 ---
 
@@ -62,7 +62,7 @@ La pregunta de investigación del ciclo: **¿qué configuración de hiperparáme
 
 ### 4.1. Corrección de la configuración desde cero
 
-Se corrigió [`desde-cero.yaml`](../utilidades-entrenamiento/configs/desde-cero.yaml) para reproducir la receta que históricamente alcanzó el nivel de referencia:
+Se corrigió [`desde-cero.yaml`](../../utilidades-entrenamiento/configs/desde-cero.yaml) para reproducir la receta que históricamente alcanzó el nivel de referencia:
 
 ```yaml
 learning_rate: 0.001
@@ -141,4 +141,4 @@ Verificación con la misma fuente (conjunto portable de 1.424 imágenes, mismo p
 - Hevner, A. R., March, S. T., Park, J., & Ram, S. (2004). Design Science in Information Systems Research. *MIS Quarterly*, 28(1), 75–105.
 - Peffers, K., Tuunanen, T., Rothenberger, M. A., & Chatterjee, S. (2007). A Design Science Research Methodology for Information Systems Research. *Journal of Management Information Systems*, 24(3), 45–77.
 - Guía de contenido del informe DSRM y Anexo G (documento de trabajo del proyecto).
-- [`TEORIA-METODO-EVALUACION.md`](TEORIA-METODO-EVALUACION.md) — teoría del método de evaluación.
+- [`TEORIA-METODO-EVALUACION.md`](../teoria/TEORIA-METODO-EVALUACION.md) — teoría del método de evaluación.

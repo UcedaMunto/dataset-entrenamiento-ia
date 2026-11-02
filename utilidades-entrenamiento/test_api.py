@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """API de pruebas (DSR) para la API de descripción de prendas.
 
-Ejecuta la prueba diseñada en docs/DSR-PRUEBA-API.md sobre el conjunto
+Ejecuta la prueba diseñada en docs/operacion/DSR-PRUEBA-API.md sobre el conjunto
 portable de test (tests/imagenes-test/) y devuelve las métricas del informe:
 exactitud de tipo, Jaccard de color y estilo, y promedio macro de propiedades.
 No entrena ni modifica pesos; solo infiere en CPU.
@@ -231,7 +231,7 @@ app = FastAPI(
     version=API_VERSION,
     description=(
         "Ejecuta la prueba de la API de descripción de prendas definida en "
-        "docs/DSR-PRUEBA-API.md sobre el conjunto portable tests/imagenes-test/."
+        "docs/operacion/DSR-PRUEBA-API.md sobre el conjunto portable tests/imagenes-test/."
     ),
     lifespan=lifespan,
 )
@@ -360,7 +360,7 @@ def design_summary() -> dict:
                 "promedio_macro": "media simple de tipo, color y estilo (cada una pesa 1/3)",
                 "criterio_aceptacion_R11": "macro ≥ 70 %",
             },
-            "6_comunicacion": "JSON de resultados guardado en tests/resultados/ y diseño en docs/DSR-PRUEBA-API.md.",
+            "6_comunicacion": "JSON de resultados guardado en tests/resultados/ y diseño en docs/operacion/DSR-PRUEBA-API.md.",
         },
         "resultado_esperado": {
             "tipo_prenda_pct": 94.94,

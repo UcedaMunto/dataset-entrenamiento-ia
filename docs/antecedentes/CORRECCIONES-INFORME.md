@@ -1,8 +1,8 @@
 # Correcciones del informe (observaciones 4, 5 y 6)
 
-> **Informe analítico fechado al 22-10-2026.** Conserva propuestas y mediciones históricas; la comprobación posterior está en [validación](docs/VALIDACION.md).
+> **Informe analítico fechado al 22-10-2026.** Conserva propuestas y mediciones históricas; la comprobación posterior está en [validación](../evaluacion/VALIDACION.md).
 
-Todas las cifras de este documento se midieron el 22-10-2026 con consultas de solo lectura sobre `dataset/metadata.sqlite`, el registro `registro_entrenamiento.sqlite` y el checkpoint compartido (`mobilenetv3-small-best.pt`, época 15, ejecución `20261018-020637`). La evaluación se repite con [EVALUACION-ENTRENAMIENTO.md](./EVALUACION-ENTRENAMIENTO.md). Lo que no se pudo medir desde este repositorio está marcado como **pendiente**.
+Todas las cifras de este documento se midieron el 22-10-2026 con consultas de solo lectura sobre `dataset/metadata.sqlite`, el registro `registro_entrenamiento.sqlite` y el checkpoint compartido (`mobilenetv3-small-best.pt`, época 15, ejecución `20261018-020637`). La evaluación se repite con [EVALUACION-ENTRENAMIENTO.md](../evaluacion/EVALUACION-ENTRENAMIENTO.md). Lo que no se pudo medir desde este repositorio está marcado como **pendiente**.
 
 ## Datos vigentes (22-10-2026, después de la depuración de duplicados)
 
@@ -339,6 +339,6 @@ R8, soportar solicitudes concurrentes. Evidencia: una solicitud a la vez por dis
 
 ## Cómo reproducir las cifras
 
-- Evaluación por propiedad: comando en [EVALUACION-ENTRENAMIENTO.md](./EVALUACION-ENTRENAMIENTO.md), con `--checkpoint /app/modelos-compartidos/mobilenetv3-small-best.pt`.
+- Evaluación por propiedad: comando en [EVALUACION-ENTRENAMIENTO.md](../evaluacion/EVALUACION-ENTRENAMIENTO.md), con `--checkpoint /app/modelos-compartidos/mobilenetv3-small-best.pt`.
 - Distribución por clase, procedencia de etiquetas, acuerdo NIM/DeepSeek y casi duplicados: consultas de solo lectura sobre `prenda`, `prenda_imagen`, `valor_propiedad_prenda`, `descripcion_prenda`, `analisis_imagen` e `imagen_huella`. No hay un script versionado para estos cálculos.
 - La base de datos cambia cuando se importan, rechazan o depuran imágenes; cada JSON de evaluación guarda el SHA-256 de la base usada.

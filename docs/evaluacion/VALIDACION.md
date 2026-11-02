@@ -1,6 +1,6 @@
 # Validación de documentación e implementación
 
-**Fecha: 23 de octubre de 2026 (UTC).** [Índice](INDICE.md) · [Resumen](<../readme resumen.md>)
+**Fecha: 23 de octubre de 2026 (UTC).** [Índice](../INDICE.md) · [Resumen](<../resumen/RESUMEN-PROYECTO.md>)
 
 ## Alcance y criterio
 
@@ -14,7 +14,7 @@ Después de la revisión general se actualizó `inference_api.py` a la aplicaci�
 
 La instalación directa se verificó en un entorno virtual temporal de Python 3.12 con PyTorch 2.5.1+cpu, torchvision 0.20.1+cpu y las dependencias fijadas del proyecto. `pip check` no encontró incompatibilidades. Las **19 pruebas actuales de entrenamiento/inferencia pasaron**, incluidas cinco pruebas HTTP con un servidor temporal. Una prueba adicional cargó el checkpoint compartido real desde una copia mínima, sin dataset en la carpeta del servicio: `/health` respondió correctamente, OpenAPI exigió solo `garment_image` y el envío de una fotografía real produjo HTTP 200 con descripción y propiedades. Los procesos temporales se detuvieron al terminar.
 
-El [manual DOCX APA 7](Instalacion_nativa_API_prendas_APA7.docx) y su [fuente de instalación](INSTALACION-NATIVA.md) describen el procedimiento. Se comprobó el formato del Word mediante renderizado a PDF. No se sustituyeron servicios existentes: requieren reiniciarse con código actualizado. La evidencia de Docker que sigue corresponde a la revisión anterior al cambio de contrato.
+El [manual DOCX APA 7](../instalacion/Instalacion_nativa_API_prendas_APA7.docx) y su [fuente de instalación](../instalacion/INSTALACION-NATIVA.md) describen el procedimiento. Se comprobó el formato del Word mediante renderizado a PDF. No se sustituyeron servicios existentes: requieren reiniciarse con código actualizado. La evidencia de Docker que sigue corresponde a la revisión anterior al cambio de contrato.
 
 ## Evidencia comprobada
 
@@ -57,7 +57,7 @@ SHA-256: `79407f5537418bc258857fa54723d8e39b152505ad3a6f6a6ea4f97e1dfcb35c`.
 
 El JSON de evaluación existente registra 1.424 imágenes test, época 15, CPU y umbral 0,5. Sus componentes son tipo 94,94 %, Jaccard de color 68,42 %, Jaccard de estilo 69,21 % y macro 77,52 %. Se verificaron los artefactos; no se repitió la evaluación completa. El checkpoint carece del estado de optimizador/scheduler para una reanudación exacta.
 
-Las limitaciones sobre etiquetas de IA, desbalance, casi duplicados y dominio visual están en [evaluación](../EVALUACION-ENTRENAMIENTO.md). El análisis previo de casi duplicados y su cifra de sensibilidad se conservan como evidencia reportada; no se recalcularon aquí. La diferencia de métricas entre modelos no dispone de prueba de significancia estadística.
+Las limitaciones sobre etiquetas de IA, desbalance, casi duplicados y dominio visual están en [evaluación](EVALUACION-ENTRENAMIENTO.md). El análisis previo de casi duplicados y su cifra de sensibilidad se conservan como evidencia reportada; no se recalcularon aquí. La diferencia de métricas entre modelos no dispone de prueba de significancia estadística.
 
 ## Correcciones y orden documental
 

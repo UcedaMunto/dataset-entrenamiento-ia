@@ -1,6 +1,6 @@
 # Iniciar el entrenamiento
 
-[Índice documental](../docs/INDICE.md) · [Panel del dataset](modelo-general-destilacion/README.md) · [Resumen del proyecto](<../readme resumen.md>).
+[Índice documental](../docs/INDICE.md) · [Panel del dataset](modelo-general-destilacion/README.md) · [Resumen del proyecto](<../docs/resumen/RESUMEN-PROYECTO.md>).
 
 Esta guía inicia entrenamiento por terminal. Para gestionarlo desde el panel, levanta el Compose unificado de la raíz (incluye `monitor`) y pulsa iniciar allí. El monitor solo puede detener los entrenamientos que él mismo lanza; evita iniciar otro por terminal al mismo tiempo.
 
@@ -26,7 +26,7 @@ docker compose up -d --build
 
 Abrir http://127.0.0.1:8090 (progreso, pérdida por época, métricas e imágenes registradas).
 
-Para continuar desde un checkpoint, selecciona la ejecución y estrategia en el panel. Se recomienda **Ajuste fino completo** desde el mejor checkpoint según validación; crea una fase nueva de hasta 10 épocas y reinicia optimizador/scheduler. Consulta la [estrategia y sus consideraciones](./README.md#estrategia-recomendada-para-continuar).
+Para continuar desde un checkpoint, selecciona la ejecución y estrategia en el panel. Se recomienda **Ajuste fino completo** desde el mejor checkpoint según validación; crea una fase nueva de hasta 10 épocas y reinicia optimizador/scheduler. Consulta la [estrategia y sus consideraciones](README.md#estrategia-recomendada-para-continuar).
 
 ## Resultados
 

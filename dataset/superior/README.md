@@ -8,4 +8,4 @@ Una prenda que integre torso y parte inferior en una sola pieza corresponde a `i
 
 Las carpetas `abrigos/` y `sueteres/` son categorías distintas y ambas se crean con la estructura inicial del dataset. En la importación automática, una etiqueta fuente ambigua como `Outwear` no se asigna a abrigo ni a chaqueta sin revisión; las etiquetas sin equivalencia aprobada se omiten.
 
-Guías por tipo: [abrigos](./abrigos/README.md), [blusas](./blusas/README.md), [camisas](./camisas/README.md), [chaquetas](./chaquetas/README.md) y [suéteres](./sueteres/README.md). Para registrar prendas y etiquetas, consulta la [guía general](../../documentacion_dataset/README.md); vuelve al [índice del dataset](../README.md) para las demás zonas.
+Guías por tipo: [abrigos](abrigos/README.md), [blusas](blusas/README.md), [camisas](camisas/README.md), [chaquetas](chaquetas/README.md) y [suéteres](sueteres/README.md). Para registrar prendas y etiquetas, consulta la [guía general](../../documentacion_dataset/README.md); vuelve al [índice del dataset](../README.md) para las demás zonas.

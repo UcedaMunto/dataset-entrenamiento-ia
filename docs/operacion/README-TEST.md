@@ -1,12 +1,12 @@
 # README-TEST — Ejecutar la prueba de la API de descripción de prendas
 
-Guía rápida de la prueba diseñada en [`docs/DSR-PRUEBA-API.md`](docs/DSR-PRUEBA-API.md). La prueba mide si la API de descripción de prendas (MobileNetV3-Small, CPU) reconoce **tipo, color y estilo** en imágenes que no usó para entrenar, y está pensada para ejecutarse en el **equipo de producción**, sin el dataset completo.
+Guía rápida de la prueba diseñada en [`DSR-PRUEBA-API.md`](DSR-PRUEBA-API.md). La prueba mide si la API de descripción de prendas (MobileNetV3-Small, CPU) reconoce **tipo, color y estilo** en imágenes que no usó para entrenar, y está pensada para ejecutarse en el **equipo de producción**, sin el dataset completo.
 
 ## Qué se necesita
 
 - Docker con Compose.
 - El checkpoint compartido (ya versionado en Git): `utilidades-entrenamiento/modelos-compartidos/mobilenetv3-small-best.pt`.
-- El conjunto portable de test (ya versionado en Git): [`tests/imagenes-test/`](tests/imagenes-test/) con 1.424 imágenes y `manifest.json`.
+- El conjunto portable de test (ya versionado en Git): [`tests/imagenes-test/`](../../tests/imagenes-test) con 1.424 imágenes y `manifest.json`.
 
 ## Arranque
 

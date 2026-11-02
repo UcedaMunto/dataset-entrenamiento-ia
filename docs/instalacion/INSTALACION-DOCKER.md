@@ -4,7 +4,7 @@ Versión: 1.1 · 02 de noviembre de 2026
 
 Guía operativa del **Reconocimiento de prendas V2**, complemento de IA del artefacto principal documentado en el informe del proyecto (nube privada, Kubernetes y VTON Studio). Alineada con la metodología **DSRM** (Peffers et al., 2007).
 
-[Índice completo](INDICE.md) · [Instalación nativa sin Docker de la API](INSTALACION-NATIVA.md) · [Referencia de endpoints](API.md)
+[Índice completo](../INDICE.md) · [Instalación nativa sin Docker de la API](INSTALACION-NATIVA.md) · [Referencia de endpoints](../operacion/API.md)
 
 ## 1. Contexto DSRM y rol de esta guía
 
@@ -19,7 +19,7 @@ Esta guía no documenta el artefacto principal: describe cómo **instanciar y de
 | 3. Diseño y desarrollo | §6 Levantar las interfaces y §9 Entrenamiento (Compose, recetas, checkpoints) |
 | 4. Demostración | §6–8 Levantar y probar los servicios (HTTP 200 e inferencia) |
 | 5. Evaluación | §8 API de pruebas DSR y §10 Informe HTML (métricas y Anexo G) |
-| 6. Comunicación | Documentos referenciados: [API.md](API.md), [DSR-PRUEBA-API.md](DSR-PRUEBA-API.md), informe y Anexo G |
+| 6. Comunicación | Documentos referenciados: [API.md](../operacion/API.md), [DSR-PRUEBA-API.md](../operacion/DSR-PRUEBA-API.md), informe y Anexo G |
 
 ## 2. Objetivo y alcance
 
@@ -32,7 +32,7 @@ Esta guía instala el sistema completo **Reconocimiento de prendas V2** en un eq
 | API de inferencia (CPU) | http://127.0.0.1:8081/docs | Describe una prenda a partir de una fotografía |
 | API de pruebas (DSR) | http://127.0.0.1:8082/docs | Ejecuta la prueba sobre el conjunto portable `tests/imagenes-test/` |
 
-Todos los servicios se levantan con el **Compose unificado de la raíz** ([docker-compose.yaml](../docker-compose.yaml)). No es necesario Docker para la API de inferencia: existe una [instalación nativa](INSTALACION-NATIVA.md) alternativa.
+Todos los servicios se levantan con el **Compose unificado de la raíz** ([docker-compose.yaml](../../docker-compose.yaml)). No es necesario Docker para la API de inferencia: existe una [instalación nativa](INSTALACION-NATIVA.md) alternativa.
 
 ## 3. Requisitos
 
@@ -115,7 +115,7 @@ curl -X POST http://127.0.0.1:8081/describir \
   -d '{"ruta_imagen": "ruta/a/una/foto.jpg"}'
 ```
 
-Consulta el contrato completo en [API.md](API.md) y en `http://127.0.0.1:8081/docs`.
+Consulta el contrato completo en [API.md](../operacion/API.md) y en `http://127.0.0.1:8081/docs`.
 
 Cambiar el checkpoint cargado por la API (antes de levantar):
 
@@ -136,7 +136,7 @@ curl -X POST "http://127.0.0.1:8082/test/run"
 curl "http://127.0.0.1:8082/test/informe"
 ```
 
-Detalle en [DSR-PRUEBA-API.md](DSR-PRUEBA-API.md) y [README-TEST.md](../README-TEST.md).
+Detalle en [DSR-PRUEBA-API.md](../operacion/DSR-PRUEBA-API.md) y [README-TEST.md](../operacion/README-TEST.md).
 
 ## 9. Entrenamiento — Diseño y desarrollo / Demostración
 
@@ -217,4 +217,4 @@ docker compose down --volumes  # además elimina volúmenes (pérdida de datos)
 | `No encontrado` al iniciar entrenamiento | Petición sin cabecera `X-Requested-With: monitor` o config inexistente | Usar el panel; elegir una config de `configs/` |
 | Puertos ocupados | Otro proceso usa 8081/8082/8090 | Cambiar los `ports` en `docker-compose.yaml` |
 | Fallo de permisos en montajes | UID/GID distinto de 1000 | Definir `TRAINING_UID`/`TRAINING_GID` en `.env` |
-| La API devuelve error de checkpoint | `MODEL_CHECKPOINT` apunta a un archivo inexistente | Verificar ruta y SHA-256 en [EVIDENCIAS-INTEGRIDAD-SHA256.md](EVIDENCIAS-INTEGRIDAD-SHA256.md) |
+| La API devuelve error de checkpoint | `MODEL_CHECKPOINT` apunta a un archivo inexistente | Verificar ruta y SHA-256 en [EVIDENCIAS-INTEGRIDAD-SHA256.md](../evaluacion/EVIDENCIAS-INTEGRIDAD-SHA256.md) |

@@ -1,6 +1,6 @@
 # Utilidades de entrenamiento
 
-[Índice documental](../docs/INDICE.md) · [Validación vigente](../docs/VALIDACION.md).
+[Índice documental](../docs/INDICE.md) · [Validación vigente](../docs/evaluacion/VALIDACION.md).
 
 Este directorio contiene el entorno Docker Compose y los scripts para el MVP MobileNetV3-Small. El dataset y sus tablas SQLite permanecen en `../dataset/`; los checkpoints y la caché de pesos preentrenados se escriben en `modelo-ia/`. Los repositorios auxiliares descargados, si fueran necesarios, se pueden colocar en `repositorios/`; no se versionan automáticamente.
 
@@ -32,7 +32,7 @@ docker compose up -d --build
 
 Abre `http://127.0.0.1:8090`. El panel permite iniciar o detener el entrenamiento, revisar progreso/métricas y probar los modelos guardados. Para detener solo el panel: `docker compose stop monitor`. Si Docker corre en otra máquina, usa un túnel SSH para el puerto 8090; el panel se enlaza solo a localhost.
 
-El dashboard de curación de datos se sirve en `http://127.0.0.1:8787` y la API CPU en `http://127.0.0.1:8081/docs`, también desde el Compose unificado; sus instrucciones están en [`modelo-general-destilacion/README.md`](./modelo-general-destilacion/README.md) y en esta guía.
+El dashboard de curación de datos se sirve en `http://127.0.0.1:8787` y la API CPU en `http://127.0.0.1:8081/docs`, también desde el Compose unificado; sus instrucciones están en [`modelo-general-destilacion/README.md`](modelo-general-destilacion/README.md) y en esta guía.
 
 ### Prueba CPU de un modelo ya entrenado
 
@@ -81,7 +81,7 @@ Sobrescribir opciones sin editar la configuración:
 docker compose run --rm train train --epochs 1 --device cpu
 ```
 
-Los hiperparámetros predeterminados están en [`configs/default.yaml`](./configs/default.yaml): MobileNetV3-Small a 224 × 224, batch 64, hasta 30 épocas, calentamiento inicial de cabezas y ajuste fino, con parada temprana. Los pesos preentrenados se guardan bajo `modelo-ia/cache/`; cada ejecución crea un directorio nuevo en `modelo-ia/runs/` con `best.pt`, `config.json` y `metrics.json`.
+Los hiperparámetros predeterminados están en [`configs/default.yaml`](configs/default.yaml): MobileNetV3-Small a 224 × 224, batch 64, hasta 30 épocas, calentamiento inicial de cabezas y ajuste fino, con parada temprana. Los pesos preentrenados se guardan bajo `modelo-ia/cache/`; cada ejecución crea un directorio nuevo en `modelo-ia/runs/` con `best.pt`, `config.json` y `metrics.json`.
 
 ## Estrategia recomendada para continuar
 
@@ -108,7 +108,7 @@ docker compose run --rm train predict \
 
 El umbral por defecto proviene del checkpoint; se puede ajustar con `--threshold 0.5`.
 
-La metodología, comando de terminal, resultados actuales y limitaciones están en el [informe de evaluación](../EVALUACION-ENTRENAMIENTO.md).
+La metodología, comando de terminal, resultados actuales y limitaciones están en el [informe de evaluación](../docs/evaluacion/EVALUACION-ENTRENAMIENTO.md).
 
 ## API de inferencia en una VM con CPU
 
@@ -117,7 +117,7 @@ La metodología, comando de terminal, resultados actuales y limitaciones están 
 ### Requisitos y selección del modelo
 
 - VM Linux con Docker Engine y Docker Compose v2.
-- El checkpoint compartido [`modelos-compartidos/mobilenetv3-small-best.pt`](./modelos-compartidos/README.md), compatible con `MobileNetV3-Small` y con el catálogo de clases almacenado en el propio archivo.
+- El checkpoint compartido [`modelos-compartidos/mobilenetv3-small-best.pt`](modelos-compartidos/README.md), compatible con `MobileNetV3-Small` y con el catálogo de clases almacenado en el propio archivo.
 - Memoria y CPU suficientes para mantener el proceso y ejecutar inferencias. En el host de desarrollo medimos 12 CPU lógicas y 15 GiB RAM; esto no es un mínimo universal ni mide tiempo de entrenamiento.
 
 Desde la raíz del proyecto, selecciona un checkpoint que exista en esa VM y levanta la API con el Compose unificado (junto al panel de dataset):
@@ -159,7 +159,7 @@ Devuelve `descripcion_mas_probable`, `tipo_prenda`, `colores`, `estilos`, `umbra
 
 **Cambio de contrato (versión de aplicación 2.0.0):** se mantiene `/v1/predict`, pero se eliminan la segunda imagen y los campos de combinación. Los clientes deben enviar solo `garment_image` y leer las predicciones directamente en el objeto raíz. Reiniciar el proceso con el código actualizado para aplicar el cambio.
 
-Para instalar el modelo y esta API directamente con Python, seguir la [guía nativa](../docs/INSTALACION-NATIVA.md) o el [manual Word en APA 7](../docs/Instalacion_nativa_API_prendas_APA7.docx). No se necesita dataset ni acceso a proveedores de anotación.
+Para instalar el modelo y esta API directamente con Python, seguir la [guía nativa](../docs/instalacion/INSTALACION-NATIVA.md) o el [manual Word en APA 7](../docs/instalacion/Instalacion_nativa_API_prendas_APA7.docx). No se necesita dataset ni acceso a proveedores de anotación.
 
 ### Red y seguridad
 
@@ -183,22 +183,22 @@ Para cambiar checkpoint, detén el servicio, actualiza `MODEL_CHECKPOINT` y vuel
 
 ## Layout
 
-- [`docker-compose.yaml`](./docker-compose.yaml): servicios CPU y GPU local.
-- [`Dockerfile`](./Dockerfile): imagen basada en PyTorch con runtime CUDA 12.4.
-- [`entrypoint.sh`](./entrypoint.sh): despacha `train`, `predict` y `status`.
-- [`train.py`](./train.py): lectura de SQLite, entrenamiento multisalida y métricas de validación.
-- [`predict.py`](./predict.py): predicción de una o varias vistas de una prenda.
-- [`modelo-ia/`](./modelo-ia/): checkpoints y caché local, excluidos de Git.
-- [`repositorios/`](./repositorios/): espacio para clones auxiliares, excluidos de Git.
-- [`scraping-plugin-chrome/folder-destino/`](./scraping-plugin-chrome/folder-destino/README.md): extensión Chrome para descargar manualmente imágenes de producto con un clic.
-- [`modelo-general-destilacion/`](./modelo-general-destilacion/README.md): pipeline separado para auditar/importar datasets públicos, guardar resultados de análisis para evitar llamadas repetidas y generar descripciones revisables; ver también el [`plan de pruebas`](./modelo-general-destilacion/PLAN-PRUEBAS.md) y [`dudas.md`](./modelo-general-destilacion/dudas.md).
+- [`docker-compose.yaml`](docker-compose.yaml): servicios CPU y GPU local.
+- [`Dockerfile`](Dockerfile): imagen basada en PyTorch con runtime CUDA 12.4.
+- [`entrypoint.sh`](entrypoint.sh): despacha `train`, `predict` y `status`.
+- [`train.py`](train.py): lectura de SQLite, entrenamiento multisalida y métricas de validación.
+- [`predict.py`](predict.py): predicción de una o varias vistas de una prenda.
+- [`modelo-ia/`](modelo-ia): checkpoints y caché local, excluidos de Git.
+- [`repositorios/`](repositorios): espacio para clones auxiliares, excluidos de Git.
+- [`scraping-plugin-chrome/folder-destino/`](scraping-plugin-chrome/folder-destino/README.md): extensión Chrome para descargar manualmente imágenes de producto con un clic.
+- [`modelo-general-destilacion/`](modelo-general-destilacion/README.md): pipeline separado para auditar/importar datasets públicos, guardar resultados de análisis para evitar llamadas repetidas y generar descripciones revisables; ver también el [`plan de pruebas`](modelo-general-destilacion/PLAN-PRUEBAS.md) y [`dudas.md`](modelo-general-destilacion/dudas.md).
 - El panel local de seguimiento se levanta con `docker compose up -d --build dashboard` desde `modelo-general-destilacion`; monitorea conteos, actividad, prompt y opciones del proveedor en `http://127.0.0.1:8787`. También inicia/detiene lotes y muestra registros por proveedor; desde esos registros se pueden borrar líneas de error o congelar temporalmente la vista sin pausar el proceso.
 
 ## Pipeline de curación y anotación
 
 Este flujo es independiente del entrenamiento de MobileNetV3-Small. Su función es auditar fuentes, seleccionar imágenes mapeadas, detectar duplicados, solicitar anotaciones visuales opcionales y guardar sugerencias revisables en el dataset compartido. No aprueba etiquetas ni inicia entrenamiento automáticamente.
 
-La guía completa, las rutas fuente, límites de envío, claves, política de fallback y ejemplos de uso están en [`modelo-general-destilacion/README.md`](./modelo-general-destilacion/README.md). El pipeline unifica `camisa` y `camiseta` en la clase canónica `camisa`, manteniendo la etiqueta de origen en SQLite. En lotes remotos se pueden seleccionar hasta 5.000 imágenes nuevas por proveedor; se omiten hashes importados y análisis vigentes para el proveedor/modelo/configuración antes de aplicar el límite. La selección recomendada busca en todas las fuentes elegibles.
+La guía completa, las rutas fuente, límites de envío, claves, política de fallback y ejemplos de uso están en [`modelo-general-destilacion/README.md`](modelo-general-destilacion/README.md). El pipeline unifica `camisa` y `camiseta` en la clase canónica `camisa`, manteniendo la etiqueta de origen en SQLite. En lotes remotos se pueden seleccionar hasta 5.000 imágenes nuevas por proveedor; se omiten hashes importados y análisis vigentes para el proveedor/modelo/configuración antes de aplicar el límite. La selección recomendada busca en todas las fuentes elegibles.
 
 Si está habilitado en `.env`, un fallo de NVIDIA NIM activa el siguiente modelo de la cadena `NVIDIA_NIM_FALLBACK_MODELS`; un fallo de DeepSeek activa NVIDIA NIM como respaldo. Estos intentos pueden enviar la imagen a otro modelo/proveedor y aumentar uso o costo, por lo que el dashboard solicita consentimiento remoto. Las claves se guardan fuera del repositorio y no deben incluirse en argumentos, documentos públicos ni commits.
 

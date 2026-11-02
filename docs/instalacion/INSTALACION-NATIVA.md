@@ -2,7 +2,7 @@
 
 Versión de la API: 2.0.0 · Edición revisada 1.1 · 23 de octubre de 2026
 
-[Documento Word con formato APA 7](Instalacion_nativa_API_prendas_APA7.docx) · [Índice](INDICE.md)
+[Documento Word con formato APA 7](Instalacion_nativa_API_prendas_APA7.docx) · [Índice](../INDICE.md)
 
 ## Objetivo y alcance
 

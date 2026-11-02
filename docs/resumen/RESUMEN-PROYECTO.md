@@ -1,7 +1,7 @@
 # Resumen del proyecto de reconocimiento de prendas
 
 **Versión 2 · Revisión: 23 de octubre de 2026 · Lectura aproximada: cuatro páginas.**
-Documento dividido en cuatro bloques con saltos sugeridos para impresión; la paginación final depende del visor. [Índice documental](docs/INDICE.md) · [Validación](docs/VALIDACION.md).
+Documento dividido en cuatro bloques con saltos sugeridos para impresión; la paginación final depende del visor. [Índice documental](../INDICE.md) · [Validación](../evaluacion/VALIDACION.md).
 
 ## Página 1 — Propósito, arquitectura y operación
 
@@ -116,4 +116,4 @@ En la revisión respondieron con HTTP 200 las dos páginas principales, la lista
 
 SQLite pasó `quick_check`, pero `foreign_key_check` encontró **15.066 referencias huérfanas** de miembros a grupos de duplicados. Hay **9.939 rutas de imagen sin archivo**, todas de prendas rechazadas, compatibles con el flujo de purga documentado; no se verificó individualmente su causa histórica. No faltan archivos del subconjunto aprobado. Estas observaciones deben resolverse o justificarse antes de declarar íntegra toda la base; no equivalen a que fallen las interfaces.
 
-La documentación queda organizada mediante un README de entrada, un índice completo, guías operativas, referencia de endpoints, evaluación y registro de validación. Los planes anteriores se conservan como antecedentes. Los próximos pasos son sanear las relaciones de duplicados con respaldo, establecer una referencia humana independiente, controlar similitudes entre splits y medir el rendimiento en el entorno final. [Consultar evidencia y verificaciones](docs/VALIDACION.md).
+La documentación queda organizada mediante un README de entrada, un índice completo, guías operativas, referencia de endpoints, evaluación y registro de validación. Los planes anteriores se conservan como antecedentes. Los próximos pasos son sanear las relaciones de duplicados con respaldo, establecer una referencia humana independiente, controlar similitudes entre splits y medir el rendimiento en el entorno final. [Consultar evidencia y verificaciones](../evaluacion/VALIDACION.md).

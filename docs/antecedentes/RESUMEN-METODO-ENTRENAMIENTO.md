@@ -1,6 +1,6 @@
 # Resumen del método de entrenamiento
 
-> **Referencia metodológica con contexto histórico.** Ya existe un modelo entrenado y evaluado. Las cifras iniciales, recomendaciones y descripciones futuras del cuerpo no son un parte de estado vigente. Consulta el [resumen actualizado](<readme resumen.md>) y la [evaluación](EVALUACION-ENTRENAMIENTO.md).
+> **Referencia metodológica con contexto histórico.** Ya existe un modelo entrenado y evaluado. Las cifras iniciales, recomendaciones y descripciones futuras del cuerpo no son un parte de estado vigente. Consulta el [resumen actualizado](<../resumen/RESUMEN-PROYECTO.md>) y la [evaluación](../evaluacion/EVALUACION-ENTRENAMIENTO.md).
 
 ## 1. Objetivo y estado actual
 
@@ -120,4 +120,4 @@ docker compose run --rm train predict --checkpoint /app/modelo-ia/runs/<ejecucio
 3. **Desbalance:** revisar el conteo por tipo, color y estilo antes de entrenar.
 4. **Orden de trabajo:** terminar el lote de anotación, revisar y aprobar, fijar particiones, entrenar la fase A, evaluar y solo entonces decidir sobre aumento de datos, ajuste fino o destilación.
 
-Más detalle en el [README del proyecto](./README.md), la [guía de entrenamiento](./utilidades-entrenamiento/README.md), la [guía de metadatos](./documentacion_dataset/README.md) y el [pipeline de curación](./utilidades-entrenamiento/modelo-general-destilacion/README.md).
+Más detalle en el [README del proyecto](../../README.md), la [guía de entrenamiento](../../utilidades-entrenamiento/README.md), la [guía de metadatos](../../documentacion_dataset/README.md) y el [pipeline de curación](../../utilidades-entrenamiento/modelo-general-destilacion/README.md).

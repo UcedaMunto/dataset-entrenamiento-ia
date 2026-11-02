@@ -2,7 +2,7 @@
 
 Este proyecto inspecciona fuentes locales, conserva su clase de origen, normaliza las categorías al dataset del proyecto y, opcionalmente, pide a uno o más proveedores visuales una descripción y sugerencias de color, estilo y temporada. Los colores están limitados al catálogo; los estilos y temporadas nuevos se incorporan automáticamente a SQLite cuando los responde una API. Es una etapa de preparación de datos; no es el entrenamiento de MobileNet ni, por sí sola, destilación de conocimiento.
 
-[Índice documental](../../docs/INDICE.md) · [Estado verificado](../../docs/VALIDACION.md).
+[Índice documental](../../docs/INDICE.md) · [Estado verificado](../../docs/evaluacion/VALIDACION.md).
 
 El máximo actual del panel es **15.000 imágenes nuevas por proveedor**; 5.000 es un objetivo de referencia, no el límite técnico.
 
@@ -28,19 +28,19 @@ docker compose --profile tools run --rm curator audit
 
 En la última auditoría local, el subset tenía 3.781 imágenes: 2.513 con clase mapeada; las otras 1.268 etiquetas se omiten. El dataset completo tenía 5.403 filas: 3.271 mapeadas y 2.132 omitidas. AIG contiene 120.000 imágenes en carpetas mapeadas y 10.000 en `Hoodies`, que se excluyen por no pertenecer al catálogo. Aunque los archivos terminan en `.jpg`, una inspección del contenido encontró 124.042 JPEG, 5.956 WebP y 2 PNG; el pipeline determina el MIME por el contenido real y conserva intactos los bytes. Ninguna de las 130.000 imágenes AIG supera 200.000 bytes (máximo observado: 92.069 bytes). Estos son conteos de inventario, no el número de imágenes que todavía necesitan análisis. Los totales se pueden volver a generar con `audit`.
 
-La configuración/mapeos editables están en [`sources.json`](./sources.json). El pipeline solo procesa etiquetas incluidas explícitamente en el mapeo: carpetas o filas fuera de la taxonomía no se copian ni se envían a una API. Las imágenes de más de **200.000 bytes (0,2 MB decimal)** también se excluyen; no se reducen, convierten ni recomprimen antes del envío. Los ZIP originales locales se conservan y `datos-crudos/` está excluido de Git.
+La configuración/mapeos editables están en [`sources.json`](sources.json). El pipeline solo procesa etiquetas incluidas explícitamente en el mapeo: carpetas o filas fuera de la taxonomía no se copian ni se envían a una API. Las imágenes de más de **200.000 bytes (0,2 MB decimal)** también se excluyen; no se reducen, convierten ni recomprimen antes del envío. Los ZIP originales locales se conservan y `datos-crudos/` está excluido de Git.
 
 ## Arquitectura mínima
 
 - [Compose unificado](../../docker-compose.yaml): servicios `dashboard` (panel) y `curator` (perfil `tools`); montan `datos-crudos/` en solo lectura y el dataset SQLite/carpeta del proyecto en escritura.
-- [`Dockerfile`](./Dockerfile): Python 3.12 con Pillow y Requests.
-- [`app.py`](./app.py): auditoría, mapeo de clases, importación, hash para evitar duplicados, cache por configuración y anotación visual opcional con fallback de proveedor/modelo.
-- [`sources.json`](./sources.json): directorios, licencia declarada, clases que se admiten y mapeos al catálogo actual.
-- [`.env.example`](./.env.example): plantilla de un único `.env` con las tres claves y configuraciones de proveedor; el `.env` real está excluido de Git.
+- [`Dockerfile`](Dockerfile): Python 3.12 con Pillow y Requests.
+- [`app.py`](app.py): auditoría, mapeo de clases, importación, hash para evitar duplicados, cache por configuración y anotación visual opcional con fallback de proveedor/modelo.
+- [`sources.json`](sources.json): directorios, licencia declarada, clases que se admiten y mapeos al catálogo actual.
+- [`.env.example`](.env.example): plantilla de un único `.env` con las tres claves y configuraciones de proveedor; el `.env` real está excluido de Git.
 - El esquema compartido contiene `descripcion_prenda` y `analisis_imagen`: anotaciones revisables y cache de decisiones por hash/clase/proveedor/modelo/versión de prompt.
 - `prenda_imagen.etiqueta_fuente` conserva la etiqueta original (por ejemplo `Polo`) junto a la categoría canónica (por ejemplo `camisa`).
 - Durante el procesamiento, las categorías `camisa` y `camiseta` se normalizan a la clase canónica `camisa`; la etiqueta original de la fuente se conserva para trazabilidad.
-- [`dashboard.py`](./dashboard.py) y [`dashboard.html`](./dashboard.html): panel local para monitorear prendas por tipo y últimas importaciones, iniciar y detener lotes desde el navegador con estado y registro en vivo, y cambiar prompt, vocabularios y proveedor/claves.
+- [`dashboard.py`](dashboard.py) y [`dashboard.html`](dashboard.html): panel local para monitorear prendas por tipo y últimas importaciones, iniciar y detener lotes desde el navegador con estado y registro en vivo, y cambiar prompt, vocabularios y proveedor/claves.
 
 Una imagen fuente produce inicialmente una carpeta/prenda en `dataset/`. Se conserva la partición si el path tiene `train`, `validation`/`val` o `test`; si no, se asigna determinísticamente por hash. El registro queda `pendiente` y `apta_para_entrenamiento=0`. Para llamadas remotas, la IA valida si la imagen corresponde a la clase fuente y puede descartarla antes de copiarla. Las imágenes aceptadas se importan con anotación pendiente; color/estilo sugeridos se guardan en `descripcion_prenda.atributos_sugeridos` y `valor_propiedad_prenda`, pero la prenda sigue pendiente y no es apta para entrenamiento. Una persona debe revisar y aprobarlas antes de entrenar.
 
@@ -72,7 +72,7 @@ No pongas claves en el Compose, argumentos de shell, SQLite ni commits. No se en
 
 ## Uso seguro y reproducible
 
-La suite automatizada local y las etapas de validación están descritas en [`PLAN-PRUEBAS.md`](./PLAN-PRUEBAS.md). Ejecuta primero sus pruebas sin red ni credenciales.
+La suite automatizada local y las etapas de validación están descritas en [`PLAN-PRUEBAS.md`](PLAN-PRUEBAS.md). Ejecuta primero sus pruebas sin red ni credenciales.
 
 Levanta la interfaz en localhost:
 
@@ -124,7 +124,7 @@ En sentido estricto, **todavía no**. Este flujo importa datos con etiquetas ori
 
 ## Decisiones pendientes
 
-Las preguntas restantes se mantienen en [`dudas.md`](./dudas.md): confirmar el tope de gasto de DeepSeek y los criterios de aprobación humana. AIG ya fue localizado, su estructura fue inspeccionada y se habilitó con las clases canónicas compatibles; `Hoodies` se excluye.
+Las preguntas restantes se mantienen en [`dudas.md`](dudas.md): confirmar el tope de gasto de DeepSeek y los criterios de aprobación humana. AIG ya fue localizado, su estructura fue inspeccionada y se habilitó con las clases canónicas compatibles; `Hoodies` se excluye.
 
 ## Reparto del lote entre categorías
 

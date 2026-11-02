@@ -1,12 +1,12 @@
 # Referencia de endpoints locales
 
-[Índice](INDICE.md) · [Validación](VALIDACION.md) · [Resumen](<../readme resumen.md>)
+[Índice](../INDICE.md) · [Validación](../evaluacion/VALIDACION.md) · [Resumen](<../resumen/RESUMEN-PROYECTO.md>)
 
 Referencia contrastada con los handlers del código el **23-10-2026**. Las respuestas JSON son las de la implementación actual; no existe un contrato OpenAPI para los paneles. La API CPU y la API de pruebas publican `/openapi.json` y `/docs`. La validación HTTP realizada fue de consulta; los POST se revisaron mediante código y pruebas automatizadas.
 
 ## Monitor de entrenamiento — puerto 8090
 
-Implementación: [`monitor.py`](../utilidades-entrenamiento/monitor.py). Los POST requieren `X-Requested-With: monitor`. Ese encabezado es una protección contra solicitudes de otros sitios, no autenticación de usuarios.
+Implementación: [`monitor.py`](../../utilidades-entrenamiento/monitor.py). Los POST requieren `X-Requested-With: monitor`. Ese encabezado es una protección contra solicitudes de otros sitios, no autenticación de usuarios.
 
 | Método | Ruta | Uso / parámetros |
 |---|---|---|
@@ -33,7 +33,7 @@ curl --fail-with-body http://127.0.0.1:8090/api/models
 
 ## Curación del dataset — puerto 8787
 
-Implementación: [`dashboard.py`](../utilidades-entrenamiento/modelo-general-destilacion/dashboard.py). Acepta Host `localhost` o `127.0.0.1`. Los POST requieren `Origin` HTTP coincidente con Host y `Content-Type: application/json`; el cuerpo debe ser un objeto JSON de 1 byte a 1 MB.
+Implementación: [`dashboard.py`](../../utilidades-entrenamiento/modelo-general-destilacion/dashboard.py). Acepta Host `localhost` o `127.0.0.1`. Los POST requieren `Origin` HTTP coincidente con Host y `Content-Type: application/json`; el cuerpo debe ser un objeto JSON de 1 byte a 1 MB.
 
 | Método | Ruta | Uso / parámetros |
 |---|---|---|
@@ -57,7 +57,7 @@ Implementación: [`dashboard.py`](../utilidades-entrenamiento/modelo-general-des
 | POST | `/api/duplicates/dismiss` | Descartar agrupación: `group_id` |
 | POST | `/api/duplicates/undo` | Deshacer resolución compatible: `group_id` |
 
-`provider` de ingesta admite `none`, `nim` o `deepseek`; el límite por lote del panel es 1–15.000. Los proveedores remotos requieren clave y ambas confirmaciones. La detención espera a que termine la solicitud activa. El flujo de selección de ambos proveedores se describe en la [guía de curación](../utilidades-entrenamiento/modelo-general-destilacion/README.md).
+`provider` de ingesta admite `none`, `nim` o `deepseek`; el límite por lote del panel es 1–15.000. Los proveedores remotos requieren clave y ambas confirmaciones. La detención espera a que termine la solicitud activa. El flujo de selección de ambos proveedores se describe en la [guía de curación](../../utilidades-entrenamiento/modelo-general-destilacion/README.md).
 
 No existe `/api/status` en este panel: consultar `/api/overview` o `/api/jobs`.
 
@@ -67,7 +67,7 @@ curl --fail-with-body http://127.0.0.1:8787/api/jobs
 
 ## API independiente CPU — puerto 8081 del host
 
-Implementación: [`inference_api.py`](../utilidades-entrenamiento/inference_api.py). Dentro del contenedor escucha en 8080. No utiliza el dataset para inferir.
+Implementación: [`inference_api.py`](../../utilidades-entrenamiento/inference_api.py). Dentro del contenedor escucha en 8080. No utiliza el dataset para inferir.
 
 | Método | Ruta | Contrato |
 |---|---|---|
@@ -77,13 +77,13 @@ Implementación: [`inference_api.py`](../utilidades-entrenamiento/inference_api.
 
 JPEG, PNG o WebP; máximo 10 MiB y 25 megapíxeles por archivo. Devuelve `descripcion_mas_probable`, `tipo_prenda`, `colores`, `estilos`, `umbral_multietiqueta`, `device` y `latencia_ms`. La descripción se genera con una plantilla de etiquetas. La aplicación 2.0.0 sustituye el contrato anterior de dos imágenes; ya no devuelve campos de combinación. Los errores incluyen 422 para archivos ausentes/ilegibles, 413 para tamaños excesivos y 415 para formatos no admitidos.
 
-Arranque y ejemplo de petición: [guía de despliegue CPU](../utilidades-entrenamiento/README.md#api-de-inferencia-en-una-vm-con-cpu).
+Arranque y ejemplo de petición: [guía de despliegue CPU](../../utilidades-entrenamiento/README.md#api-de-inferencia-en-una-vm-con-cpu).
 
-Instalación directa con Python: [guía nativa](INSTALACION-NATIVA.md) y [manual DOCX APA 7](Instalacion_nativa_API_prendas_APA7.docx). En instalación nativa se recomienda enlazar `127.0.0.1:8081` con Uvicorn.
+Instalación directa con Python: [guía nativa](../instalacion/INSTALACION-NATIVA.md) y [manual DOCX APA 7](../instalacion/Instalacion_nativa_API_prendas_APA7.docx). En instalación nativa se recomienda enlazar `127.0.0.1:8081` con Uvicorn.
 
 ## API de pruebas (DSR) — puerto 8082 del host
 
-Implementación: [`test_api.py`](../utilidades-entrenamiento/test_api.py). Ejecuta la prueba de la API de descripción de prendas sobre el conjunto portable [`tests/imagenes-test/`](../tests/imagenes-test/), sin usar el dataset completo. Diseño: [DSR-PRUEBA-API.md](DSR-PRUEBA-API.md).
+Implementación: [`test_api.py`](../../utilidades-entrenamiento/test_api.py). Ejecuta la prueba de la API de descripción de prendas sobre el conjunto portable [`tests/imagenes-test/`](../../tests/imagenes-test), sin usar el dataset completo. Diseño: [DSR-PRUEBA-API.md](DSR-PRUEBA-API.md).
 
 | Método | Ruta | Contrato |
 |---|---|---|

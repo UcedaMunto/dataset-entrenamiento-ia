@@ -83,7 +83,7 @@ PORTABLE_TEST_RESULTS = {
     },
 }
 
-# SHA-256 completos verificados (fuente: docs/EVIDENCIAS-INTEGRIDAD-SHA256.md).
+# SHA-256 completos verificados (fuente: docs/evaluacion/EVIDENCIAS-INTEGRIDAD-SHA256.md).
 # Se recalculan al ejecutar el script y se contrastan con estos valores.
 KNOWN_CHECKPOINT_SHA = {
     "20261026-021300": "79407f5537418bc258857fa54723d8e39b152505ad3a6f6a6ea4f97e1dfcb35c",
@@ -325,7 +325,7 @@ h2.sec{font-size:16px;margin:34px 0 12px;font-weight:bold;border-bottom:1px soli
 <section class="table-block">
 <table class="apa-table small"><thead><tr><th>Run id</th><th>Fecha (UTC)</th><th>Checkpoint</th><th>Época</th><th>Configuración diferencial</th><th>SHA-256 del checkpoint</th></tr></thead>
 <tbody>__TRACE_ROWS__</tbody></table>
-<p class="table-source">Fuente: <code>utilidades-entrenamiento/modelo-ia/registro_entrenamiento.sqlite</code> y <code>docs/EVIDENCIAS-INTEGRIDAD-SHA256.md</code>. Las tres ejecuciones comparten image_size 224, batch 64, pretrained y finetune activados, weight_decay 1e-4, label_smoothing 0,05, class_weighted, augment y amp activados, early_stopping_patience 5 y seed 42. La ejecución de referencia usó una versión anterior de <code>metadata.sqlite</code> (split train 11.616); la fallida y la corregida usaron la actual (train 11.592).</p>
+<p class="table-source">Fuente: <code>utilidades-entrenamiento/modelo-ia/registro_entrenamiento.sqlite</code> y <code>docs/evaluacion/EVIDENCIAS-INTEGRIDAD-SHA256.md</code>. Las tres ejecuciones comparten image_size 224, batch 64, pretrained y finetune activados, weight_decay 1e-4, label_smoothing 0,05, class_weighted, augment y amp activados, early_stopping_patience 5 y seed 42. La ejecución de referencia usó una versión anterior de <code>metadata.sqlite</code> (split train 11.616); la fallida y la corregida usaron la actual (train 11.592).</p>
 </section>
 
 <h2 class="sec">Tabla 3 · Hitos de la validación (base de las figuras de evolución)</h2>

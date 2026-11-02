@@ -1,6 +1,6 @@
 # README-PRUEBA — Cómo se hizo la prueba de la API de descripción de prendas
 
-Documento de detalle (máximo dos páginas) de la prueba reportada en la Tabla 6 del informe y reproducida con la API de pruebas. La metodología sigue Design Science Research; el diseño de una página está en [`docs/DSR-PRUEBA-API.md`](docs/DSR-PRUEBA-API.md).
+Documento de detalle (máximo dos páginas) de la prueba reportada en la Tabla 6 del informe y reproducida con la API de pruebas. La metodología sigue Design Science Research; el diseño de una página está en [`DSR-PRUEBA-API.md`](DSR-PRUEBA-API.md).
 
 ## 1. Objetivo y problema
 
@@ -16,12 +16,12 @@ El modelo se construyó con un dataset de 17.000 imágenes, etiquetadas con ayud
 | val | 1.416 |
 | test | 1.424 |
 
-La prueba usa el **split test completo: 1.424 imágenes** (una por prenda, en su mayoría fotografías de catálogos públicos). De ellas, **1.418** tienen color y estilo anotados; 6 no tienen color/estilo. El test no se usó para elegir checkpoint ni umbral (0,5 fijo). Para el equipo de producción, esas 1.424 imágenes y sus etiquetas de referencia se exportaron a [`tests/imagenes-test/`](tests/imagenes-test/) con un `manifest.json` que guarda el SHA-256 de cada imagen.
+La prueba usa el **split test completo: 1.424 imágenes** (una por prenda, en su mayoría fotografías de catálogos públicos). De ellas, **1.418** tienen color y estilo anotados; 6 no tienen color/estilo. El test no se usó para elegir checkpoint ni umbral (0,5 fijo). Para el equipo de producción, esas 1.424 imágenes y sus etiquetas de referencia se exportaron a [`tests/imagenes-test/`](../../tests/imagenes-test) con un `manifest.json` que guarda el SHA-256 de cada imagen.
 
 ## 3. Instrumento y predicción
 
-- **Nodo de entrenamiento:** [`utilidades-entrenamiento/evaluate_properties.py`](utilidades-entrenamiento/evaluate_properties.py), que lee `dataset/metadata.sqlite` y el checkpoint, infiere en CPU y no modifica pesos.
-- **Equipo de producción:** [`utilidades-entrenamiento/test_api.py`](utilidades-entrenamiento/test_api.py), que ejecuta la misma prueba sobre `tests/imagenes-test/` mediante `POST /test/run`.
+- **Nodo de entrenamiento:** [`utilidades-entrenamiento/evaluate_properties.py`](../../utilidades-entrenamiento/evaluate_properties.py), que lee `dataset/metadata.sqlite` y el checkpoint, infiere en CPU y no modifica pesos.
+- **Equipo de producción:** [`utilidades-entrenamiento/test_api.py`](../../utilidades-entrenamiento/test_api.py), que ejecuta la misma prueba sobre `tests/imagenes-test/` mediante `POST /test/run`.
 - **Predicción:** tipo = clase de mayor probabilidad (softmax/argmax); color y estilo = etiquetas con probabilidad (sigmoide) ≥ **0,5**.
 
 ## 4. Cálculos

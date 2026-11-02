@@ -32,4 +32,4 @@ curl -X POST "http://127.0.0.1:8082/test/run"          # prueba completa
 curl "http://127.0.0.1:8082/test/results"              # reportes guardados
 ```
 
-Diseño de la prueba: [`docs/DSR-PRUEBA-API.md`](../../docs/DSR-PRUEBA-API.md).
+Diseño de la prueba: [`DSR-PRUEBA-API.md`](../../docs/operacion/DSR-PRUEBA-API.md).

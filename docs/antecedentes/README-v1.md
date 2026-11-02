@@ -1,6 +1,6 @@
-> **VERSIÓN 1 — DESCARTADA.** Este plan se conserva únicamente como respaldo histórico. Se descartó para dar paso a la versión 2; seguir las instrucciones de [`README.md`](./README.md).
+> **VERSIÓN 1 — DESCARTADA.** Este plan se conserva únicamente como respaldo histórico. Se descartó para dar paso a la versión 2; seguir las instrucciones de [`README.md`](../../README.md).
 >
-> Para la documentación vigente del dataset, consulta el [índice](./dataset/README.md), la [guía de metadatos](./documentacion_dataset/README.md) y el [esquema SQLite](./documentacion_dataset/schema.sql).
+> Para la documentación vigente del dataset, consulta el [índice](../../dataset/README.md), la [guía de metadatos](../../documentacion_dataset/README.md) y el [esquema SQLite](../../documentacion_dataset/schema.sql).
 
 # Reconocimiento de prendas
 

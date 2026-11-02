@@ -1,6 +1,6 @@
 # Evaluación del clasificador (MobileNetV3-Small)
 
-La revisión del 23-10-2026 contrastó estas cifras con los JSON locales existentes y el hash del checkpoint; no ejecutó una nueva evaluación completa. Véase [validación](docs/VALIDACION.md). La columna de entrenamiento del 22 de octubre es una comparación fechada, no necesariamente la última ejecución disponible.
+La revisión del 23-10-2026 contrastó estas cifras con los JSON locales existentes y el hash del checkpoint; no ejecutó una nueva evaluación completa. Véase [validación](VALIDACION.md). La columna de entrenamiento del 22 de octubre es una comparación fechada, no necesariamente la última ejecución disponible.
 
 ## Diseño de la prueba
 
@@ -52,4 +52,4 @@ El modelo reportado en el informe es el checkpoint compartido; la diferencia con
 4. **Exacta frente a parcial:** con coincidencia exacta, color y estilo quedan por debajo de 70 %; solo el macro con Jaccard supera el criterio.
 5. **Dominio:** fotos de catálogos públicos, no de una persona vistiendo la prenda; esa condición no se midió.
 
-Análisis ampliado y correcciones al informe: [CORRECCIONES-INFORME.md](./CORRECCIONES-INFORME.md).
+Análisis ampliado y correcciones al informe: [CORRECCIONES-INFORME.md](../antecedentes/CORRECCIONES-INFORME.md).

@@ -9,9 +9,9 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.opc.constants import RELATIONSHIP_TYPE
 
-root = Path(__file__).resolve().parents[1]
-source = root / 'docs/INSTALACION-NATIVA.md'
-output = root / 'docs/Instalacion_nativa_API_prendas_APA7.docx'
+root = Path(__file__).resolve().parents[2]
+source = root / 'docs/instalacion/INSTALACION-NATIVA.md'
+output = root / 'docs/instalacion/Instalacion_nativa_API_prendas_APA7.docx'
 doc = Document()
 section = doc.sections[0]
 section.page_width, section.page_height = Inches(8.5), Inches(11)

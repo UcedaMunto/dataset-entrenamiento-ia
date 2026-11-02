@@ -1,6 +1,6 @@
 # Teoría del entrenamiento de MobileNetV3-Small para reconocimiento de prendas
 
-**Documento de referencia (≈10 páginas).** Resume la teoría que sustenta el entrenamiento implementado en [`utilidades-entrenamiento/train.py`](../utilidades-entrenamiento/train.py) y las configuraciones [`default.yaml`](../utilidades-entrenamiento/configs/default.yaml) y [`desde-cero.yaml`](../utilidades-entrenamiento/configs/desde-cero.yaml). Los valores numéricos citados corresponden a la implementación real del repositorio, no a ejemplos genéricos.
+**Documento de referencia (≈10 páginas).** Resume la teoría que sustenta el entrenamiento implementado en [`utilidades-entrenamiento/train.py`](../../utilidades-entrenamiento/train.py) y las configuraciones [`default.yaml`](../../utilidades-entrenamiento/configs/default.yaml) y [`desde-cero.yaml`](../../utilidades-entrenamiento/configs/desde-cero.yaml). Los valores numéricos citados corresponden a la implementación real del repositorio, no a ejemplos genéricos.
 
 ---
 
@@ -111,7 +111,7 @@ Entrenar una CNN desde pesos aleatorios exige millones de imágenes. En su lugar
 - **Backbone congelado (freeze):** sus parámetros no reciben gradiente y no se actualizan. Solo se entrenan las cabezas.
 - **Backbone descongelado (fine-tuning):** todos los parámetros se actualizan, el backbone con una tasa menor para no destruir las características preentrenadas.
 
-La implementación controla esto en [`train.py`](../utilidades-entrenamiento/train.py) mediante `set_backbone_trainable()`:
+La implementación controla esto en [`train.py`](../../utilidades-entrenamiento/train.py) mediante `set_backbone_trainable()`:
 
 - Si `finetune=true` y `warmup_epochs=0`, el backbone queda **descongelado desde la época 1**.
 - Si `finetune=true` y `warmup_epochs>0`, el backbone inicia **congelado** y se descongela en la época `warmup_epochs + 1`.
@@ -306,7 +306,7 @@ En este proyecto, `train_loss` y `val_loss` **no son directamente comparables**:
 
 ### 11.2. Hipótesis sobre la degradación observada
 
-El [análisis de degradación](../EVALUACION-ENTRENAMIENTO.md) y las ejecuciones registradas permiten ordenar hipótesis:
+El [análisis de degradación](../evaluacion/EVALUACION-ENTRENAMIENTO.md) y las ejecuciones registradas permiten ordenar hipótesis:
 
 - **H1. Ausencia de ajuste fino tras el warmup:** la ejecución del 26/10 configuró `warmup_epochs=3` y se detuvo en la época 3; el backbone nunca se descongeló. Es la hipótesis principal.
 - **H2. Tasa de aprendizaje demasiado alta:** el 26/10 usó 0,001/0,0001 (correcta para desde cero, pero el experimento cambió varias variables a la vez, así que su efecto no quedó aislado).
@@ -377,4 +377,4 @@ Cada ejecución crea `modelo-ia/runs/<fecha-hora>/` con `config.json`, `metrics.
 
 ---
 
-*Documento derivado de la implementación real del repositorio; no sustituye los artefactos de cada ejecución. Consulta [`TEORIA-ENTRENAMIENTO.md`](../TEORIA-ENTRENAMIENTO.md) para el glosario rápido y [`EVALUACION-ENTRENAMIENTO.md`](../EVALUACION-ENTRENAMIENTO.md) para resultados.*
+*Documento derivado de la implementación real del repositorio; no sustituye los artefactos de cada ejecución. Consulta [`TEORIA-ENTRENAMIENTO.md`](TEORIA-ENTRENAMIENTO.md) para el glosario rápido y [`EVALUACION-ENTRENAMIENTO.md`](../evaluacion/EVALUACION-ENTRENAMIENTO.md) para resultados.*

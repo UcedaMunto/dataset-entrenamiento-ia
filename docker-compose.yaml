@@ -72,7 +72,7 @@ services:
       - "${MODEL_CHECKPOINT:-./utilidades-entrenamiento/modelos-compartidos/mobilenetv3-small-best.pt}:/models/best.pt:ro"
       - ./tests/imagenes-test:/app/test-imagenes:ro
       - ./tests/resultados:/app/test-resultados
-      - ./docs/DSR-PRUEBA-API.md:/app/test-design.md:ro
+      - ./docs/operacion/DSR-PRUEBA-API.md:/app/test-design.md:ro
     ports:
       - "127.0.0.1:8082:8082"
     restart: unless-stopped

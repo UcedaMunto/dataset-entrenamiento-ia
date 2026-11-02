@@ -7,7 +7,7 @@ Esta carpeta documenta la estructura de imágenes y el registro de metadatos en 
 - Las imágenes permanecen en carpetas organizadas por zona y tipo de prenda dentro de `dataset/`.
 - Los datos de cada prenda, las rutas a sus imágenes y las etiquetas se guardan en `dataset/metadata.sqlite`.
 - No se usa un JSON por prenda ni un CSV como fuente de verdad. El archivo `descripcion.json` puede usarse solo como formato de intercambio si se desarrolla una importación/exportación explícita.
-- [`schema.sql`](./schema.sql) define las siete tablas y las propiedades iniciales. [`crear_estructura.sh`](./crear_estructura.sh) prepara los directorios y crea la base a partir de ese esquema.
+- [`schema.sql`](schema.sql) define las siete tablas y las propiedades iniciales. [`crear_estructura.sh`](crear_estructura.sh) prepara los directorios y crea la base a partir de ese esquema.
 
 Para una visión del objetivo global y del flujo de entrenamiento, consulta el [README vigente del proyecto](../README.md). El [índice del dataset](../dataset/README.md) enlaza las guías de clasificación por zona y tipo.
 
@@ -73,7 +73,7 @@ prenda 1 ─── N valor_propiedad_prenda N ─── 1 catalogo_propiedad
 - **`analisis_imagen`**: registra decisiones válidas de análisis visual por huella de imagen, clase, proveedor/modelo y versión de prompt. Guarda aceptaciones y descartes para evitar pagar y repetir la misma inferencia; errores HTTP/red y respuestas inválidas no se cachean. Una imagen puede tener análisis de más de un proveedor o modelo por una evaluación cruzada o un fallback; la fila identifica cuál produjo cada resultado.
 - **`pipeline_config`**: almacena el prompt editable del pipeline; claves API no se almacenan en SQLite.
 
-El esquema completo e inicialización del catálogo están en [`schema.sql`](./schema.sql). SQLite debe abrirse con claves foráneas activadas (`PRAGMA foreign_keys = ON`) en cada conexión. Las rutas de imágenes son relativas al directorio `dataset/`, nunca rutas absolutas de una laptop. El pipeline de datasets externos documenta el uso de `descripcion_prenda` en [`modelo-general-destilacion/`](../utilidades-entrenamiento/modelo-general-destilacion/README.md).
+El esquema completo e inicialización del catálogo están en [`schema.sql`](schema.sql). SQLite debe abrirse con claves foráneas activadas (`PRAGMA foreign_keys = ON`) en cada conexión. Las rutas de imágenes son relativas al directorio `dataset/`, nunca rutas absolutas de una laptop. El pipeline de datasets externos documenta el uso de `descripcion_prenda` en [`modelo-general-destilacion/`](../utilidades-entrenamiento/modelo-general-destilacion/README.md).
 
 ### Ejemplo conceptual
 
@@ -153,7 +153,7 @@ Cuando el dataset esté suficientemente completo y revisado, el proceso de entre
 7. Mantener todas las fotos de la misma prenda en el split indicado en `prenda`.
 8. Guardar pesos, configuración y métricas en `utilidades-entrenamiento/modelo-ia/`, fuera del dataset.
 
-Los ejemplos de documentación no sustituyen fotografías reales autorizadas ni son suficientes para entrenar. Los scripts Docker de entrenamiento ya están implementados; el estado comprobado se mantiene en [validación](../docs/VALIDACION.md).
+Los ejemplos de documentación no sustituyen fotografías reales autorizadas ni son suficientes para entrenar. Los scripts Docker de entrenamiento ya están implementados; el estado comprobado se mantiene en [validación](../docs/evaluacion/VALIDACION.md).
 
 ## Factibilidad y alcance del MVP
 
@@ -165,9 +165,9 @@ Estado comprobado el **23-10-2026**: hay **14.456 prendas aprobadas y aptas** (1
 - La configuración actual usa 224 px, batch 64 y ajuste fino; no es una garantía de compatibilidad con equipos de poca VRAM. Consultar `configs/default.yaml` y probar recursos antes de entrenar.
 - La revisión encontró referencias huérfanas en grupos de duplicados y archivos ausentes solo en prendas rechazadas. Todas las imágenes aprobadas están presentes; la integridad física de SQLite y la integridad de sus relaciones son comprobaciones distintas.
 
-El detalle de consultas, pruebas y límites está en [validación](../docs/VALIDACION.md). Los resultados y sus limitaciones están en [evaluación](../EVALUACION-ENTRENAMIENTO.md). Para operar, seguir la [guía de entrenamiento](../utilidades-entrenamiento/README.md) o la [guía de curación](../utilidades-entrenamiento/modelo-general-destilacion/README.md). Antes de entrenar con nuevas incorporaciones, revisar etiquetas, procedencia y separación de duplicados entre splits.
+El detalle de consultas, pruebas y límites está en [validación](../docs/evaluacion/VALIDACION.md). Los resultados y sus limitaciones están en [evaluación](../docs/evaluacion/EVALUACION-ENTRENAMIENTO.md). Para operar, seguir la [guía de entrenamiento](../utilidades-entrenamiento/README.md) o la [guía de curación](../utilidades-entrenamiento/modelo-general-destilacion/README.md). Antes de entrenar con nuevas incorporaciones, revisar etiquetas, procedencia y separación de duplicados entre splits.
 
 ## Archivos de esta carpeta
 
-- [`crear_estructura.sh`](./crear_estructura.sh): crea carpetas y base SQLite sin borrar ni sobrescribir contenido existente.
-- [`schema.sql`](./schema.sql): crea las siete tablas e inserta las propiedades iniciales.
+- [`crear_estructura.sh`](crear_estructura.sh): crea carpetas y base SQLite sin borrar ni sobrescribir contenido existente.
+- [`schema.sql`](schema.sql): crea las siete tablas e inserta las propiedades iniciales.

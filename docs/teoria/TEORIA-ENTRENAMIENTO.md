@@ -1,6 +1,6 @@
 # Terminología y teoría del entrenamiento
 
-> **Referencia conceptual.** Para configuración, estado y resultados vigentes consulta el [resumen del proyecto](<readme resumen.md>); los ejemplos teóricos no sustituyen los artefactos de cada ejecución.
+> **Referencia conceptual.** Para configuración, estado y resultados vigentes consulta el [resumen del proyecto](<../resumen/RESUMEN-PROYECTO.md>); los ejemplos teóricos no sustituyen los artefactos de cada ejecución.
 
 Explica los conceptos detrás del entrenamiento que hace este proyecto (`utilidades-entrenamiento/train.py`, configuración en `configs/default.yaml`).
 
