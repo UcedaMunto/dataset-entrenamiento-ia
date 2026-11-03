@@ -76,6 +76,7 @@ Instrucciones completas en [Instalación Docker](docs/instalacion/INSTALACION-DO
 |---|---|
 | [Referencia de endpoints locales](docs/operacion/API.md) | Contratos HTTP de paneles, API CPU y API de pruebas. |
 | [Guía de interfaces — botones y funciones](docs/operacion/GUIA-INTERFACES.md) | Capturas de pantalla y lista de botones de las dos interfaces. |
+| [Manual de uso de las interfaces (APA 7)](docs/operacion/Manual-uso-interfaces-MobileNetV3-APA7.docx) | Manual Word con botones, selectores y opciones de las dos interfaces y anexo de uso de MobileNetV3. |
 | [Diseño de prueba DSR — API de descripción](docs/operacion/DSR-PRUEBA-API.md) | Prueba de una página basada en Design Science Research. |
 | [README-TEST — Ejecutar la prueba](docs/operacion/README-TEST.md) | Guía rápida para correr la prueba con la API. |
 | [README-PRUEBA — Cómo se hizo la prueba](docs/operacion/README-PRUEBA.md) | Detalle de ejecución y resultados. |
