@@ -42,7 +42,25 @@ docker compose down
 
 Instrucciones completas en [Instalación Docker](docs/instalacion/INSTALACION-DOCKER.md) · [Instalación nativa sin Docker](docs/instalacion/INSTALACION-NATIVA.md).
 
-## 3. Flujo y estado comprobado
+## 3. Ubicación de datos crudos y pesos entrenados
+
+### 3.1 Datos crudos (fuentes de imágenes)
+
+Las fuentes externas descargadas se conservan en solo lectura en [utilidades-entrenamiento/modelo-general-destilacion/datos-crudos/](utilidades-entrenamiento/modelo-general-destilacion/datos-crudos/):
+
+- `clothing-dataset-small-master/` — carpetas `train`, `validation` y `test` organizadas por clase.
+- `clothing-dataset-master/` — `images.csv` y el directorio `images/` con las fotografías.
+- `AIG-Dataset/` — trece carpetas de clase con fotografías de prendas.
+
+El mapeo de clases, licencias y permisos de importación está en [sources.json](utilidades-entrenamiento/modelo-general-destilacion/sources.json). El dataset curado (imágenes por categoría y base `metadata.sqlite`) vive en [dataset/](dataset/).
+
+### 3.2 Pesos entrenados (checkpoints)
+
+- **Checkpoint compartido (producción):** [utilidades-entrenamiento/modelos-compartidos/mobilenetv3-small-best.pt](utilidades-entrenamiento/modelos-compartidos/mobilenetv3-small-best.pt).
+- **Checkpoints por ejecución:** `utilidades-entrenamiento/modelo-ia/runs/<run-id>/best.pt`; por ejemplo, la ejecución de referencia en `20261026-021300/best.pt` y la corregida en `20261029-022656/best.pt`.
+- **Respaldos:** [respaldos/](respaldos/) conserva tar.gz de entrenamientos y respaldos del dataset previos a purgas.
+
+## 4. Flujo y estado comprobado
 
 `Fuentes locales → curación/anotación → revisión y aprobación → SQLite + imágenes → entrenamiento → evaluación → checkpoint → inferencia`.
 
@@ -50,9 +68,9 @@ Instrucciones completas en [Instalación Docker](docs/instalacion/INSTALACION-DO
 - Checkpoint compartido (`mobilenetv3-small-best.pt`): **tipo 94,94 %** · **color Jaccard 68,42 %** · **estilo Jaccard 69,21 %** · **promedio macro 77,52 %**.
 - El macro no equivale a exactitud global. Las etiquetas de color/estilo proceden de IA y se reportaron casi duplicados entre splits: ver [limitaciones de la evaluación](docs/evaluacion/EVALUACION-ENTRENAMIENTO.md).
 
-## 4. Mapa completo de la documentación
+## 5. Mapa completo de la documentación
 
-### 4.1 Entrada y resumen
+### 5.1 Entrada y resumen
 
 | Documento | Propósito |
 |---|---|
@@ -61,7 +79,7 @@ Instrucciones completas en [Instalación Docker](docs/instalacion/INSTALACION-DO
 | [Resumen del proyecto](docs/resumen/RESUMEN-PROYECTO.md) | Resumen ejecutivo de unas cuatro páginas, apto para impresión. |
 | [Índice de documentación](docs/INDICE.md) | Mapa detallado por carpetas temáticas. |
 
-### 4.2 Instalación
+### 5.2 Instalación
 
 | Documento | Propósito |
 |---|---|
@@ -70,7 +88,7 @@ Instrucciones completas en [Instalación Docker](docs/instalacion/INSTALACION-DO
 | [Manual Word APA 7](docs/instalacion/Instalacion_nativa_API_prendas_APA7.docx) | Versión editable DOCX de la instalación nativa. |
 | [Generador del manual DOCX](docs/instalacion/generar_manual_docx.py) | Script que sincroniza el Word con `INSTALACION-NATIVA.md`. |
 
-### 4.3 Operación: API y pruebas
+### 5.3 Operación: API y pruebas
 
 | Documento | Propósito |
 |---|---|
@@ -81,7 +99,7 @@ Instrucciones completas en [Instalación Docker](docs/instalacion/INSTALACION-DO
 | [README-TEST — Ejecutar la prueba](docs/operacion/README-TEST.md) | Guía rápida para correr la prueba con la API. |
 | [README-PRUEBA — Cómo se hizo la prueba](docs/operacion/README-PRUEBA.md) | Detalle de ejecución y resultados. |
 
-### 4.4 Evaluación y evidencias
+### 5.4 Evaluación y evidencias
 
 | Documento | Propósito |
 |---|---|
@@ -94,7 +112,7 @@ Instrucciones completas en [Instalación Docker](docs/instalacion/INSTALACION-DO
 | [Resumen de los últimos 3 entrenamientos (DOCX)](docs/evaluacion/Resumen_Ultimos_3_Entrenamientos.docx) | Comparativo Word de los tres entrenamientos. |
 | [Datos para gráficos del entrenamiento](docs/datos-graficos/README.md) | CSV/JSON de métricas por época y resultados de test. |
 
-### 4.5 Teoría y método
+### 5.5 Teoría y método
 
 | Documento | Propósito |
 |---|---|
@@ -102,7 +120,7 @@ Instrucciones completas en [Instalación Docker](docs/instalacion/INSTALACION-DO
 | [Terminología y teoría del entrenamiento](docs/teoria/TEORIA-ENTRENAMIENTO.md) | Referencia conceptual y glosario rápido. |
 | [Teoría y conceptos del método de evaluación (DSRM)](docs/teoria/TEORIA-METODO-EVALUACION.md) | Métricas, Jaccard, macro, control y validez. |
 
-### 4.6 Antecedentes
+### 5.6 Antecedentes
 
 Documentos históricos conservados como contexto; sus cifras **no** representan el estado vigente.
 
@@ -113,7 +131,7 @@ Documentos históricos conservados como contexto; sus cifras **no** representan 
 | [Reconocimiento de prendas — V1](docs/antecedentes/README-v1.md) | Versión histórica descartada. |
 | [Resumen del método de entrenamiento](docs/antecedentes/RESUMEN-METODO-ENTRENAMIENTO.md) | Método con contexto histórico. |
 
-### 4.7 Dataset y taxonomía
+### 5.7 Dataset y taxonomía
 
 | Documento | Propósito |
 |---|---|
@@ -124,7 +142,7 @@ Documentos históricos conservados como contexto; sus cifras **no** representan 
 | [Prendas de la parte superior](dataset/superior/README.md) · [Abrigo](dataset/superior/abrigos/README.md) · [Blusa](dataset/superior/blusas/README.md) · [Camisa](dataset/superior/camisas/README.md) · [Chaqueta](dataset/superior/chaquetas/README.md) · [Suéter](dataset/superior/sueteres/README.md) | Clases de la parte superior. |
 | [Conjunto portable de prueba](tests/imagenes-test/README.md) | 1.424 imágenes del split test con manifest. |
 
-### 4.8 Utilidades de entrenamiento y curación
+### 5.8 Utilidades de entrenamiento y curación
 
 | Documento | Propósito |
 |---|---|
@@ -136,7 +154,7 @@ Documentos históricos conservados como contexto; sus cifras **no** representan 
 | [Dudas y decisiones antes de procesar datos](utilidades-entrenamiento/modelo-general-destilacion/dudas.md) | Preguntas abiertas y decisiones previas. |
 | [Extensión Chrome: descargar imagen](utilidades-entrenamiento/scraping-plugin-chrome/folder-destino/README.md) | Utilidad auxiliar de captura de imágenes. |
 
-## 5. Archivos técnicos clave
+## 6. Archivos técnicos clave
 
 - [Compose unificado](docker-compose.yaml) y [Compose de entrenamiento por terminal](utilidades-entrenamiento/docker-compose.yaml).
 - [Esquema SQLite](documentacion_dataset/schema.sql) y [creación de estructura](documentacion_dataset/crear_estructura.sh).
@@ -144,6 +162,6 @@ Documentos históricos conservados como contexto; sus cifras **no** representan 
 - [Fuentes de datos](utilidades-entrenamiento/modelo-general-destilacion/sources.json).
 - [Validador documental](docs/validar_documentacion.py): `python3 docs/validar_documentacion.py` (comprueba enlaces, anclas y cobertura del índice).
 
-## 6. Alcance y notas
+## 7. Alcance y notas
 
 El alcance es clasificar una misma prenda por imagen o conjunto de vistas. No hay detección de múltiples prendas, segmentación ni salida de temporada. La integración con OpenStack/Kubernetes queda fuera de esta implementación. Los planes y V1 se conservan como antecedentes.
